@@ -227,3 +227,26 @@ I precedenti file con nomi basati su hash o organizzati in cartelle BUR_NUMERO
 non vengono cancellati o rinominati.
 Una nuova esecuzione genera i nomi descrittivi riutilizzando i download in cache.
 
+
+
+
+## Tipo del fascicolo dai metadati PDF
+
+Il componente TYPE del nome viene ricavato prima dal campo `Title` del PDF
+scaricato. Se `pdfinfo` (Poppler) è disponibile nel PATH, viene eseguito sul
+PDF passando i byte tramite stdin. Se manca, fallisce o non restituisce un
+titolo, viene letto lo stesso campo `/Title` tramite `pypdf`.
+Non è necessario installare Poppler per usare lo script.
+
+Se il titolo PDF non identifica un tipo, per esempio `bur-99.PDF`, viene
+usato il titolo della pagina del fascicolo. Numero e anno restano quelli
+del fascicolo nell'archivio. Se i metadati indicano solo “Supplemento”,
+TYPE diventa `supplemento`, senza aggiungere un sottotipo non esplicitato.
+Esempio: `2026/BUR_30-2026-supplemento.pdf`.
+
+Gli indici CSV/JSON includono `titolo_pdf`, `tipo_fascicolo` e `fonte_tipo`
+(`pdfinfo`, `pdf_metadata` o `titolo_pagina`). `tipo_documento` mantiene il
+significato di sommario separato oppure ripiego sulle pagine dell'integrale.
+Questa inferenza dipende dalla qualità dei metadati pubblicati dalla Regione.
+I vecchi file non vengono rinominati; la nuova esecuzione riusa la cache per
+generare i nuovi percorsi.
