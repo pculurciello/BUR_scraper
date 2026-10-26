@@ -155,6 +155,57 @@ class NamingTests(unittest.TestCase):
             self.assertTrue((root/row['pdf']).is_file())
             self.assertTrue((root/row['testo']).is_file())
 
+class MetadataTypeTests(unittest.TestCase):
+    def test_pdfinfo_title(self):
+        reader = Mock()
+        result = Mock(returncode=0, stdout=b'Title: Supplemento straordinario n. 4\n')
+        with patch.object(bur.shutil, 'which', return_value='/usr/bin/pdfinfo'), \
+             patch.object(bur.subprocess, 'run', return_value=result) as run:
+            title, source = bur.pdf_document_title(b'pdf-data', reader)
+        self.assertEqual(source, 'pdfinfo')
+        self.assertEqual(bur.infer_document_type(title), 'supplemento_straordinario')
+        self.assertEqual(run.call_args.kwargs['input'], b'pdf-data')
+
+    def test_pypdf_fallback(self):
+        reader = Mock()
+        reader.metadata.title = 'Sommario relativo al BUR n. 42 del 21 ottobre 2026'
+        with patch.object(bur.shutil, 'which', return_value=None):
+            title, source = bur.pdf_document_title(b'pdf-data', reader)
+        self.assertEqual(source, 'pdf_metadata')
+        self.assertEqual(bur.infer_document_type(title), 'ordinario')
+
+    def test_failed_pdfinfo_falls_back(self):
+        reader = Mock()
+        reader.metadata.title = 'Supplemento n. 30'
+        with patch.object(bur.shutil, 'which', return_value='pdfinfo'), \
+             patch.object(bur.subprocess, 'run', side_effect=bur.subprocess.TimeoutExpired('pdfinfo', 30)):
+            title, source = bur.pdf_document_title(b'pdf-data', reader)
+        self.assertEqual(source, 'pdf_metadata')
+        self.assertEqual(bur.infer_document_type(title), 'supplemento')
+
+    def test_generic_pdf_title_is_not_classified(self):
+        self.assertIsNone(bur.infer_document_type('bur-99.PDF'))
+
+    def test_metadata_overrides_webpage_type(self):
+        from pypdf import PdfWriter
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        writer.add_metadata({'/Title': 'Sommario relativo al 1° Supplemento n. 30 del 19 ottobre 2026 relativo al BUR n. 41'})
+        buf = io.BytesIO()
+        writer.write(buf)
+        title = 'I SUPPLEMENTO ORDINARIO N. 30 DEL 19 OTTOBRE 2026 AL BUR N. 41'
+        client = Mock()
+        client.page.return_value = bur.Page('<div class="box-titolo">'+title+'</div>'
+            '<a href="/newbur/downloadPDF?doc=0&amp;name=test.pdf">Sommario</a>')
+        client.get.return_value = buf.getvalue()
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(bur.shutil, 'which', return_value=None):
+            row = bur.fetch_summary(client, 2026, bur.HOME, title, Path(tmp), 12)
+            self.assertEqual(row['pdf'], '2026/BUR_30-2026-supplemento.pdf')
+            self.assertEqual(row['tipo_fascicolo'], 'supplemento')
+            self.assertEqual(row['fonte_tipo'], 'pdf_metadata')
+
 if __name__ == '__main__': unittest.main()
+
 
 
