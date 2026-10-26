@@ -10,6 +10,9 @@ import hashlib
 import io
 import json
 import logging
+import os
+import shutil
+import subprocess
 import re
 import ssl
 import random
@@ -286,24 +289,51 @@ def discover(client, year, seed, errors):
     return found, len(visited)
 
 
-def document_basename(root, year, title):
-    """Raggruppa per anno; il nome contiene numero, anno e tipo."""
+def infer_document_type(title):
+    title = clean(title).upper()
+    if 'SUPPLEMENTO' in title:
+        if 'STRAORDINARIO' in title:
+            return 'supplemento_straordinario'
+        if 'ORDINARIO' in title:
+            return 'supplemento_ordinario'
+        return 'supplemento'
+    if 'STRAORDINARI' in title:
+        return 'straordinario'
+    if (title.startswith('NUMERO') or 'ORDINARIO' in title
+            or re.search(r'\bBUR\s+(?:N[.°º]?\s*)?\d+\b', title)):
+        return 'ordinario'
+    return None
+
+
+def pdf_document_title(data, reader):
+    """Legge Title con pdfinfo, oppure /Title con pypdf senza dipendenze native."""
+    if shutil.which('pdfinfo'):
+        try:
+            result = subprocess.run(
+                ['pdfinfo', '-enc', 'UTF-8', '-'], input=data,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+                env={**os.environ, 'LC_ALL': 'C'}, check=False)
+            if result.returncode == 0:
+                match = re.search(r'^Title:[ \t]*(.*)$',
+                                  result.stdout.decode('utf-8', errors='replace'), re.M)
+                if match and clean(match.group(1)):
+                    return clean(match.group(1)), 'pdfinfo'
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    metadata = reader.metadata
+    title = metadata.title if metadata else None
+    return (clean(str(title)), 'pdf_metadata') if title else ('', '')
+
+
+def document_basename(root, year, title, document_type=None):
+    """Numero dal fascicolo; tipo dai metadati PDF quando disponibile."""
     title = clean(title).upper()
     number = re.search(r'\b(?:NUMERO|N[.°º]?)\s*(\d+)', title)
     if not number:
         raise ValueError('Numero del fascicolo non riconosciuto: ' + title)
-    if 'SUPPLEMENTO' in title:
-        if 'STRAORDINARIO' in title:
-            kind = 'supplemento_straordinario'
-        elif 'ORDINARIO' in title:
-            kind = 'supplemento_ordinario'
-        else:
-            kind = 'supplemento'
-    elif 'STRAORDINARI' in title:
-        kind = 'straordinario'
-    elif title.startswith('NUMERO') or 'ORDINARIO' in title:
-        kind = 'ordinario'
-    else:
+    kind = document_type or infer_document_type(title)
+    if kind not in {'ordinario', 'straordinario', 'supplemento',
+                    'supplemento_ordinario', 'supplemento_straordinario'}:
         raise ValueError('Tipo del fascicolo non riconosciuto: ' + title)
     return root / str(year) / f'BUR_{int(number.group(1))}-{year}-{kind}'
 
@@ -338,9 +368,9 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
     uid = hashlib.sha256(url.encode()).hexdigest()[:16]
     row = dict(anno=year, id=uid, titolo=title, url_fascicolo=url,
                url_documento='', tipo_documento='', stato='', pdf='', testo='',
-               pagine_pdf=0, pagine_estratte=0, errore='')
+               pagine_pdf=0, pagine_estratte=0, errore='',
+               titolo_pdf='', tipo_fascicolo='', fonte_tipo='')
     try:
-        base = document_basename(root, year, title)
         page = client.page(url)
         if page.titles and clean(page.titles[0]).casefold() != clean(title).casefold():
             raise ValueError('Titolo del dettaglio diverso da quello in archivio: '
@@ -365,6 +395,13 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         row['url_documento'] = target
         data = client.get(target, pdf=True)
         reader = PdfReader(io.BytesIO(data))
+        pdf_title, metadata_source = pdf_document_title(data, reader)
+        kind = infer_document_type(pdf_title)
+        row['titolo_pdf'] = pdf_title
+        row['fonte_tipo'] = metadata_source if kind else 'titolo_pagina'
+        kind = kind or infer_document_type(title)
+        base = document_basename(root, year, title, document_type=kind)
+        row['tipo_fascicolo'] = kind
         count = len(reader.pages)
         row['pagine_pdf'] = count
         limit = count if summaries else min(count, legacy_pages)
@@ -441,7 +478,8 @@ def main():
     seeds = {int(label): canonical(urljoin(HOME, value))
              for value, label in home.options if label.isdigit() and value}
     fields = ['anno', 'id', 'titolo', 'url_fascicolo', 'url_documento', 'tipo_documento',
-              'stato', 'pdf', 'testo', 'pagine_pdf', 'pagine_estratte', 'errore']
+              'stato', 'pdf', 'testo', 'pagine_pdf', 'pagine_estratte', 'errore',
+              'titolo_pdf', 'tipo_fascicolo', 'fonte_tipo']
     for year in range(args.dal, args.al + 1):
         LOG.info('Anno %s', year)
         if year not in seeds:
@@ -475,6 +513,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
