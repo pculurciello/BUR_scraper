@@ -104,30 +104,40 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(bur.retry_after_seconds({'Retry-After':'Wed, 21 Oct 2015 07:28:00 GMT'}), 0)
 
 class NamingTests(unittest.TestCase):
-    def test_paths_for_ordinary_and_supplements(self):
+    def test_url_paths(self):
         cases = [
-            (2026, 'NUMERO 42 - 21 OTTOBRE 2026', '2026/BUR_42-2026-ordinario'),
-            (2026, 'I SUPPLEMENTO ORDINARIO N. 30 DEL 19 OTTOBRE 2026 AL BUR N. 41',
-             '2026/BUR_30-2026-supplemento_ordinario'),
-            (1999, 'SUPPLEMENTO STRAORDINARIO N.4 DEL 22 APRILE 1999 AL BUR N.16',
-             '1999/BUR_4-1999-supplemento_straordinario'),
-            (2026, 'V SUPPLEMENTO ORDINARIO N. 1 DI DATA 2 GENNAIO 2026 AL BUR N. 53 DI DATA 31 DICEMBRE 2025',
-             '2026/BUR_1-2026-supplemento_ordinario'),
-            (2026, 'SUPPLEMENTO N. 2', '2026/BUR_2-2026-supplemento'),
+            ('2020%2F04%2F08%2F17', 'ordinario', '2020/BUR_17_08_04_ordinario'),
+            ('2026/10/19/30', 'supplemento', '2026/BUR_30_19_10_supplemento'),
+            ('2026/01/02/1', 'supplemento_ordinario', '2026/BUR_1_02_01_supplemento_ordinario'),
+            ('2020/4/8/017', 'straordinario', '2020/BUR_17_08_04_straordinario'),
         ]
-        for year, title, expected in cases:
-            with self.subTest(title=title):
-                self.assertEqual(bur.document_basename(Path('out'), year, title), Path('out')/expected)
+        for bnum, kind, expected in cases:
+            with self.subTest(bnum=bnum):
+                url = bur.HOME + 'visionaBUR?bnum=' + bnum
+                self.assertEqual(bur.document_basename(Path('out'), url, kind), Path('out')/expected)
 
-    def test_unknown_metadata_is_rejected(self):
-        for title in ['Documento senza numero', 'Documento N. 42']:
-            with self.subTest(title=title):
-                with self.assertRaises(ValueError): bur.document_basename(Path('out'), 2026, title)
+    def test_invalid_url_metadata_is_rejected(self):
+        for bnum in ['2020/02/30/17', '../../bad', '2020/04/08', '']:
+            with self.subTest(bnum=bnum):
+                with self.assertRaises(ValueError):
+                    bur.document_basename(Path('out'), bur.HOME+'visionaBUR?bnum='+bnum, 'ordinario')
+        with self.assertRaises(ValueError):
+            bur.document_basename(Path('out'), bur.HOME, 'ordinario')
+
+    def test_legacy_url_uses_url_ids(self):
+        url = 'https://www.regione.fvg.it/asp/bur/ricerca/archivio2/archivioDettaglio.asp?num=5&nodo=73'
+        self.assertEqual(bur.document_basename(Path('out'), url, 'supplemento', 1999),
+                         Path('out/1999/BUR_legacy_5_73_supplemento'))
+
+    def test_date_distinguishes_same_number_and_type(self):
+        url = bur.HOME + 'visionaBUR?bnum='
+        self.assertNotEqual(bur.document_basename(Path('out'), url+'2026/01/02/1', 'ordinario'),
+                            bur.document_basename(Path('out'), url+'2026/01/07/1', 'ordinario'))
 
     def test_collision_does_not_overwrite_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            base = bur.document_basename(root, 2026, 'NUMERO 42')
+            base = bur.document_basename(root, bur.HOME+'visionaBUR?bnum=2026/10/21/42', 'ordinario')
             pdf, txt = bur.save_document_files(root, base, 'source-a', b'pdf-a', 'text-a')
             with self.assertRaisesRegex(ValueError, 'Collisione'):
                 bur.save_document_files(root, base, 'source-b', b'pdf-b', 'text-b')
@@ -149,9 +159,9 @@ class NamingTests(unittest.TestCase):
         client.get.return_value = buf.getvalue()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            row = bur.fetch_summary(client, 2026, bur.HOME, title, root, 12)
-            self.assertEqual(row['pdf'], '2026/BUR_42-2026-ordinario.pdf')
-            self.assertEqual(row['testo'], '2026/BUR_42-2026-ordinario.txt')
+            row = bur.fetch_summary(client, 2026, bur.HOME+'visionaBUR?bnum=2020%2F04%2F08%2F17', title, root, 12)
+            self.assertEqual(row['pdf'], '2020/BUR_17_08_04_ordinario.pdf')
+            self.assertEqual(row['testo'], '2020/BUR_17_08_04_ordinario.txt')
             self.assertTrue((root/row['pdf']).is_file())
             self.assertTrue((root/row['testo']).is_file())
 
@@ -200,12 +210,13 @@ class MetadataTypeTests(unittest.TestCase):
         client.get.return_value = buf.getvalue()
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(bur.shutil, 'which', return_value=None):
-            row = bur.fetch_summary(client, 2026, bur.HOME, title, Path(tmp), 12)
-            self.assertEqual(row['pdf'], '2026/BUR_30-2026-supplemento.pdf')
+            row = bur.fetch_summary(client, 2026, bur.HOME+'visionaBUR?bnum=2026/10/19/30', title, Path(tmp), 12)
+            self.assertEqual(row['pdf'], '2026/BUR_30_19_10_supplemento.pdf')
             self.assertEqual(row['tipo_fascicolo'], 'supplemento')
             self.assertEqual(row['fonte_tipo'], 'pdf_metadata')
 
 if __name__ == '__main__': unittest.main()
+
 
 
 
