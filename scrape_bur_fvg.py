@@ -11,13 +11,15 @@ import io
 import json
 import logging
 import re
+import ssl
 import time
 from collections import deque
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import Request, build_opener, HTTPCookieProcessor
+from urllib.error import URLError
+from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPSHandler
 from pypdf import PdfReader
 
 HOME = 'https://bur.regione.fvg.it/newbur/'
@@ -121,11 +123,27 @@ def pagination(page, base, year):
     return sorted(out)
 
 
+def tls_context(ca_file=None, use_certifi=False):
+    """Mantiene il trust di sistema e aggiunge un bundle CA se richiesto."""
+    context = ssl.create_default_context()
+    if use_certifi:
+        try:
+            import certifi
+        except ImportError as exc:
+            raise ValueError('Installare certifi: python -m pip install --upgrade certifi') from exc
+        context.load_verify_locations(cafile=certifi.where())
+    if ca_file:
+        context.load_verify_locations(cafile=str(ca_file))
+    return context
+
+
 class Client:
-    def __init__(self, root, delay, timeout, retries, refresh=False):
+    def __init__(self, root, delay, timeout, retries, refresh=False,
+                 ca_file=None, use_certifi=False):
         self.cache = root / 'cache'
         self.cache.mkdir(parents=True, exist_ok=True)
-        self.opener = build_opener(HTTPCookieProcessor(CookieJar()))
+        self.opener = build_opener(HTTPCookieProcessor(CookieJar()),
+                                   HTTPSHandler(context=tls_context(ca_file, use_certifi)))
         self.delay, self.timeout, self.retries = delay, timeout, retries
         self.refresh = refresh
         self.last = 0.0
@@ -156,7 +174,16 @@ class Client:
                 tmp.write_bytes(data)
                 tmp.replace(path)
                 return data
-            except Exception:
+            except Exception as exc:
+                reason = exc.reason if isinstance(exc, URLError) else exc
+                if isinstance(reason, ssl.SSLCertVerificationError):
+                    raise RuntimeError(
+                        f'Verifica TLS fallita per {urlsplit(url).hostname}: {reason}. '
+                        'Aggiornare i certificati di Python oppure usare --certifi '
+                        '(python -m pip install --upgrade certifi). '
+                        'Con proxy aziendale, usare --ca-file /percorso/ca-aziendale.pem '
+                        'con un certificato fornito dal proprio amministratore.'
+                    ) from exc
                 if attempt == self.retries:
                     raise
                 time.sleep(min(30, 2 ** (attempt + 1)))
@@ -272,6 +299,9 @@ def main():
     ap.add_argument('--delay', type=float, default=1.0)
     ap.add_argument('--timeout', type=float, default=45)
     ap.add_argument('--retries', type=int, default=3)
+    ca = ap.add_mutually_exclusive_group()
+    ca.add_argument('--ca-file', type=Path, help='Bundle CA PEM aggiuntivo, anche per proxy aziendali')
+    ca.add_argument('--certifi', action='store_true', help='Aggiunge il bundle CA del pacchetto certifi')
     ap.add_argument('--refresh', action='store_true', help='Ignora cache, utile per annualità corrente')
     ap.add_argument('--legacy-pages', type=int, default=12,
                     help='Senza sommario separato, estrae N pagine iniziali dal PDF completo; '
@@ -287,9 +317,14 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(root/'scraping.log', encoding='utf-8')])
-    client = Client(root, args.delay, args.timeout, args.retries, args.refresh)
+    try:
+        client = Client(root, args.delay, args.timeout, args.retries, args.refresh,
+                        ca_file=args.ca_file, use_certifi=args.certifi)
+        home = client.page(HOME)
+    except Exception as exc:
+        LOG.error('Impossibile inizializzare il download: %s', exc)
+        return 2
     errors, rows, coverage = [], [], []
-    home = client.page(HOME)
     seeds = {int(label): canonical(urljoin(HOME, value))
              for value, label in home.options if label.isdigit() and value}
     fields = ['anno', 'id', 'titolo', 'url_fascicolo', 'url_documento', 'tipo_documento',
