@@ -20,9 +20,9 @@ un bollettino ordinario possono avere lo stesso numero.
 
 - `fascicoli.csv` e `fascicoli.json`: un record per fascicolo, con titolo, URL,
   stato di elaborazione e percorsi dei file.
-- `AAAA/ID.pdf`: sommario PDF separato quando disponibile; in alternativa,
+- `BUR_NUMERO/ANNO_TIPO.pdf`: sommario PDF separato quando disponibile; in alternativa,
   PDF completo, se il ripiego storico è abilitato.
-- `AAAA/ID.txt`: testo estratto, con separatori di pagina.
+- `BUR_NUMERO/ANNO_TIPO.txt`: testo estratto, con separatori di pagina.
 - `copertura.csv`: pagine di archivio visitate, fascicoli scoperti, elaborati
   e anomalie di navigazione per anno. Non certifica la completezza dell'archivio.
 - `errori.json`: anomalie di navigazione e annualità assenti. Gli errori dei
@@ -191,3 +191,38 @@ inosservata. Preferire un bundle CA attendibile quando disponibile.
 ```bash
 python scrape_bur_fvg.py --dal 1999 --al 2026 --output bur_fvg --timeout 180 --retries 8 --insecure
 ```
+
+
+
+## Nomi dei documenti
+
+I file PDF e TXT usano il percorso `BUR_[NUMBER]/[YEAR]_[TYPE].pdf` e `.txt`.
+Lo slash è un separatore di directory: per esempio:
+
+```text
+bur_fvg/
+  BUR_42/
+    2026_ordinario.pdf
+    2026_ordinario.txt
+  BUR_30/
+    2026_supplemento_ordinario.pdf
+    2026_supplemento_ordinario.txt
+  BUR_4/
+    1999_supplemento_straordinario.pdf
+    1999_supplemento_straordinario.txt
+```
+
+Per un supplemento, NUMBER è il suo numero, non quello del BUR ordinario
+richiamato nel titolo. YEAR è l'annualità di pubblicazione nell'archivio.
+TYPE distingue `ordinario`, `straordinario`, `supplemento_ordinario`,
+`supplemento_straordinario` e `supplemento` quando il sottotipo non è indicato.
+Gli indici CSV/JSON riportano i nuovi percorsi relativi.
+
+`file_sources.json` associa i percorsi agli URL di origine. Se due fascicoli
+con URL diversi produrrebbero lo stesso percorso, il secondo viene segnalato
+come errore invece di sovrascrivere il primo. Non eliminare questo registro
+per forzare una sovrascrittura. Un numero o tipo non riconosciuto viene
+segnalato come errore, senza creare un nome arbitrario.
+
+I precedenti file con nomi basati su hash non vengono cancellati o rinominati.
+Una nuova esecuzione genera i nomi descrittivi riutilizzando i download in cache.
