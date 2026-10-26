@@ -286,14 +286,61 @@ def discover(client, year, seed, errors):
     return found, len(visited)
 
 
+def document_basename(root, year, title):
+    """Lo slash richiesto separa la cartella BUR_NUMERO dal nome del file."""
+    title = clean(title).upper()
+    number = re.search(r'\b(?:NUMERO|N[.°º]?)\s*(\d+)', title)
+    if not number:
+        raise ValueError('Numero del fascicolo non riconosciuto: ' + title)
+    if 'SUPPLEMENTO' in title:
+        if 'STRAORDINARIO' in title:
+            kind = 'supplemento_straordinario'
+        elif 'ORDINARIO' in title:
+            kind = 'supplemento_ordinario'
+        else:
+            kind = 'supplemento'
+    elif 'STRAORDINARI' in title:
+        kind = 'straordinario'
+    elif title.startswith('NUMERO') or 'ORDINARIO' in title:
+        kind = 'ordinario'
+    else:
+        raise ValueError('Tipo del fascicolo non riconosciuto: ' + title)
+    return root / f'BUR_{int(number.group(1))}' / f'{year}_{kind}'
+
+
+def save_document_files(root, base, source_url, data, text):
+    """Evita di sovrascrivere un altro fascicolo con numero/anno/tipo uguali."""
+    registry_path = root / 'file_sources.json'
+    registry = json.loads(registry_path.read_text(encoding='utf-8')) if registry_path.exists() else {}
+    pdfpath, txtpath = base.with_suffix('.pdf'), base.with_suffix('.txt')
+    key = pdfpath.relative_to(root).as_posix()
+    owner = registry.get(key)
+    if owner is not None and owner != source_url:
+        raise ValueError(f'Collisione del nome {key}: gia assegnato a {owner}')
+    payloads = ((pdfpath, data), (txtpath, text.encode('utf-8')))
+    if owner is None:
+        for path, payload in payloads:
+            if path.exists() and path.read_bytes() != payload:
+                raise ValueError(f'File preesistente senza provenienza verificabile: {path}')
+    base.parent.mkdir(parents=True, exist_ok=True)
+    for path, payload in payloads:
+        tmp = path.with_suffix(path.suffix + '.tmp')
+        tmp.write_bytes(payload)
+        tmp.replace(path)
+    registry[key] = source_url
+    tmp = registry_path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding='utf-8')
+    tmp.replace(registry_path)
+    return pdfpath, txtpath
+
+
 def fetch_summary(client, year, url, title, root, legacy_pages):
     uid = hashlib.sha256(url.encode()).hexdigest()[:16]
-    folder = root / str(year)
-    folder.mkdir(parents=True, exist_ok=True)
     row = dict(anno=year, id=uid, titolo=title, url_fascicolo=url,
                url_documento='', tipo_documento='', stato='', pdf='', testo='',
                pagine_pdf=0, pagine_estratte=0, errore='')
     try:
+        base = document_basename(root, year, title)
         page = client.page(url)
         if page.titles and clean(page.titles[0]).casefold() != clean(title).casefold():
             raise ValueError('Titolo del dettaglio diverso da quello in archivio: '
@@ -317,18 +364,15 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
             return row
         row['url_documento'] = target
         data = client.get(target, pdf=True)
-        pdfpath = folder / f'{uid}.pdf'
-        pdfpath.write_bytes(data)
-        row['pdf'] = str(pdfpath.relative_to(root))
         reader = PdfReader(io.BytesIO(data))
         count = len(reader.pages)
         row['pagine_pdf'] = count
         limit = count if summaries else min(count, legacy_pages)
         text = '\n\n'.join(f'--- Pagina {i+1} ---\n{reader.pages[i].extract_text() or ""}'
                            for i in range(limit))
-        txtpath = folder / f'{uid}.txt'
-        txtpath.write_text(text, encoding='utf-8')
-        row['testo'] = str(txtpath.relative_to(root))
+        pdfpath, txtpath = save_document_files(root, base, url, data, text)
+        row['pdf'] = pdfpath.relative_to(root).as_posix()
+        row['testo'] = txtpath.relative_to(root).as_posix()
         row['pagine_estratte'] = limit
         has_text = any((reader.pages[i].extract_text() or '').strip() for i in range(limit))
         row['stato'] = ('ok' if summaries else 'da_verificare') if has_text else 'ocr_necessario'
@@ -431,4 +475,5 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
