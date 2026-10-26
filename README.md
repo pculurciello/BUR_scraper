@@ -146,4 +146,48 @@ Con Python installato da python.org su macOS, eseguire anche il comando
 Python, se disponibile. Se il problema persiste anche con CA aggiornate,
 verificare la catena del server e l'eventuale proxy con l'amministratore.
 Gli errori di verifica TLS producono un messaggio specifico senza ritentativi
-inutili. La verifica TLS resta sempre abilitata.
+inutili. La verifica TLS è abilitata per impostazione predefinita.
+
+
+
+## Risposte lente e ritentativi silenziosi
+
+Ogni richiesta di rete usa un timeout di 30 secondi per le operazioni socket
+(non un limite alla durata totale del download) e fino a 5 ritentativi dopo
+il primo: al massimo 6 tentativi. Sono incluse le richieste della home page,
+degli archivi, dei dettagli e dei PDF.
+
+Timeout, errori di connessione, risposte interrotte o di formato inatteso e
+HTTP 408, 425, 429, 500, 502, 503, 504 vengono ritentati senza stampare
+messaggi intermedi. Le pause crescono da 2 secondi, con una piccola variazione
+casuale, fino a un massimo di 60 secondi. Se presente, `Retry-After` viene
+usato al posto della pausa esponenziale, con lo stesso massimo di 60 secondi.
+Un errore viene segnalato soltanto dopo l'ultimo tentativo. Gli errori permanenti
+come HTTP 404 e gli errori di verifica dei certificati falliscono subito.
+I normali messaggi di avanzamento per anno rimangono visibili.
+
+Per un portale particolarmente lento:
+
+```bash
+python scrape_bur_fvg.py --dal 1999 --al 2026 --output bur_fvg --timeout 180 --retries 8 --retry-backoff 3 --retry-max-wait 60
+```
+
+`--retries 0` disabilita i ritentativi. Le risposte fallite o incomplete non
+vengono salvate in cache. Per eseguire i test senza contattare il portale:
+
+```bash
+python -m unittest -v test_scrape_bur_fvg.py
+```
+
+
+### Workaround TLS esplicito
+
+La verifica TLS è attiva per impostazione predefinita. Se occorre continuare
+con il workaround richiesto in precedenza, usare `--insecure` per la singola
+esecuzione. L'opzione disabilita la verifica del certificato e del nome host
+per le richieste dello scraper; una connessione intercettata può passare
+inosservata. Preferire un bundle CA attendibile quando disponibile.
+
+```bash
+python scrape_bur_fvg.py --dal 1999 --al 2026 --output bur_fvg --timeout 180 --retries 8 --insecure
+```
