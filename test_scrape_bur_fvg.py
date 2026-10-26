@@ -110,6 +110,7 @@ class NamingTests(unittest.TestCase):
             ('2026/10/19/30', 'supplemento', '2026/BUR_30_19_10_supplemento'),
             ('2026/01/02/1', 'supplemento_ordinario', '2026/BUR_1_02_01_supplemento_ordinario'),
             ('2020/4/8/017', 'straordinario', '2020/BUR_17_08_04_straordinario'),
+            ('2020%2F01%2F02%2F1_1', 'supplemento', '2020/BUR_1_02_01_supplemento'),
         ]
         for bnum, kind, expected in cases:
             with self.subTest(bnum=bnum):
@@ -134,16 +135,48 @@ class NamingTests(unittest.TestCase):
         self.assertNotEqual(bur.document_basename(Path('out'), url+'2026/01/02/1', 'ordinario'),
                             bur.document_basename(Path('out'), url+'2026/01/07/1', 'ordinario'))
 
-    def test_collision_does_not_overwrite_files(self):
+    def test_collision_suffixes_and_stable_rerun(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            base = bur.document_basename(root, bur.HOME+'visionaBUR?bnum=2026/10/21/42', 'ordinario')
-            pdf, txt = bur.save_document_files(root, base, 'source-a', b'pdf-a', 'text-a')
-            with self.assertRaisesRegex(ValueError, 'Collisione'):
-                bur.save_document_files(root, base, 'source-b', b'pdf-b', 'text-b')
-            self.assertEqual(pdf.read_bytes(), b'pdf-a')
-            self.assertEqual(txt.read_text(), 'text-a')
-            bur.save_document_files(root, base, 'source-a', b'pdf-a', 'text-a')
+            prefix = bur.HOME+'visionaBUR?bnum=2020/01/02/'
+            urls = [prefix+'1', prefix+'1_1', prefix+'1_2']
+            saved = []
+            for i, url in enumerate(urls):
+                base = bur.document_basename(root, url, 'supplemento')
+                saved.append(bur.save_document_files(root, base, url,
+                             f'pdf-{i}'.encode(), f'text-{i}'))
+            self.assertEqual([p.name for p, _ in saved], [
+                'BUR_1_02_01_supplemento.pdf', 'BUR_1_02_01_supplemento_2.pdf',
+                'BUR_1_02_01_supplemento_3.pdf'])
+            for i in reversed(range(3)):
+                base = bur.document_basename(root, urls[i], 'supplemento')
+                again = bur.save_document_files(root, base, urls[i],
+                                               f'pdf-{i}'.encode(), f'text-{i}')
+                self.assertEqual(again, saved[i])
+                self.assertEqual(again[0].read_bytes(), f'pdf-{i}'.encode())
+                self.assertEqual(again[1].stem, again[0].stem)
+
+    def test_encoded_url_reuses_existing_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = bur.HOME+'visionaBUR?bnum=2020/01/02/1_1'
+            encoded = bur.HOME+'visionaBUR?bnum=2020%2F01%2F02%2F1_1'
+            base = bur.document_basename(root, raw, 'ordinario')
+            first = bur.save_document_files(root, base, raw, b'pdf', 'text')
+            second = bur.save_document_files(root, base, encoded, b'pdf', 'text')
+            self.assertEqual(first, second)
+
+    def test_untracked_files_are_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            url = bur.HOME+'visionaBUR?bnum=2020/01/02/1'
+            base = bur.document_basename(root, url, 'ordinario')
+            base.parent.mkdir()
+            base.with_suffix('.txt').write_text('existing file')
+            pdf, txt = bur.save_document_files(root, base, url, b'new-pdf', 'new-text')
+            self.assertTrue(pdf.stem.endswith('_2'))
+            self.assertEqual(base.with_suffix('.txt').read_text(), 'existing file')
+            self.assertEqual(txt.read_text(), 'new-text')
 
     def test_fetch_summary_records_new_paths(self):
         from pypdf import PdfWriter
@@ -216,6 +249,7 @@ class MetadataTypeTests(unittest.TestCase):
             self.assertEqual(row['fonte_tipo'], 'pdf_metadata')
 
 if __name__ == '__main__': unittest.main()
+
 
 
 
