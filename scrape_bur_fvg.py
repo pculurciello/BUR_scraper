@@ -126,6 +126,8 @@ def pagination(page, base, year):
 def tls_context(ca_file=None, use_certifi=False):
     """Mantiene il trust di sistema e aggiunge un bundle CA se richiesto."""
     context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
     if use_certifi:
         try:
             import certifi
