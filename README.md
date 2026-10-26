@@ -20,9 +20,9 @@ un bollettino ordinario possono avere lo stesso numero.
 
 - `fascicoli.csv` e `fascicoli.json`: un record per fascicolo, con titolo, URL,
   stato di elaborazione e percorsi dei file.
-- `ANNO/BUR_NUMERO-ANNO-TIPO.pdf`: sommario PDF separato quando disponibile; in alternativa,
+- `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.pdf`: sommario PDF separato quando disponibile; in alternativa,
   PDF completo, se il ripiego storico è abilitato.
-- `ANNO/BUR_NUMERO-ANNO-TIPO.txt`: testo estratto, con separatori di pagina.
+- `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.txt`: testo estratto, con separatori di pagina.
 - `copertura.csv`: pagine di archivio visitate, fascicoli scoperti, elaborati
   e anomalie di navigazione per anno. Non certifica la completezza dell'archivio.
 - `errori.json`: anomalie di navigazione e annualità assenti. Gli errori dei
@@ -194,40 +194,38 @@ python scrape_bur_fvg.py --dal 1999 --al 2026 --output bur_fvg --timeout 180 --r
 
 
 
-## Nomi dei documenti
+## Nomi dei documenti derivati dall'URL
 
-I file PDF e TXT usano il percorso `[YEAR]/BUR_[NUMBER]-[YEAR]-[TYPE].pdf` e `.txt`.
-I documenti sono raggruppati in una directory per anno. Per esempio:
+Per gli URL `visionaBUR?bnum=AAAA/MM/GG/NUMERO`, anno, numero, giorno e mese
+provengono esclusivamente da `bnum`, anche quando è codificato con `%2F`.
+I metadati PDF e il titolo della pagina determinano soltanto TYPE.
 
-```text
-bur_fvg/
-  2026/
-    BUR_42-2026-ordinario.pdf
-    BUR_42-2026-ordinario.txt
-    BUR_30-2026-supplemento_ordinario.pdf
-    BUR_30-2026-supplemento_ordinario.txt
-  1999/
-    BUR_4-1999-supplemento_straordinario.pdf
-    BUR_4-1999-supplemento_straordinario.txt
-```
+Esempio:
 
-Per un supplemento, NUMBER è il suo numero, non quello del BUR ordinario
-richiamato nel titolo. YEAR è l'annualità di pubblicazione nell'archivio.
+- URL: `https://bur.regione.fvg.it/newbur/visionaBUR?bnum=2020%2F04%2F08%2F17`
+- PDF: `2020/BUR_17_08_04_ordinario.pdf`
+- TXT: `2020/BUR_17_08_04_ordinario.txt`
+
+Il formato è `[YEAR]/BUR_[NUMBER]_[DAY]_[MONTH]_[TYPE].pdf` (e `.txt`).
+Giorno e mese hanno sempre due cifre. L'anno è presente nella cartella.
+Un numero di BUR citato nel titolo o nei metadati non modifica quello nell'URL.
 TYPE distingue `ordinario`, `straordinario`, `supplemento_ordinario`,
-`supplemento_straordinario` e `supplemento` quando il sottotipo non è indicato.
-Gli indici CSV/JSON riportano i nuovi percorsi relativi.
+`supplemento_straordinario` e `supplemento`.
+Gli indici CSV/JSON riportano i percorsi relativi prodotti.
 
-`file_sources.json` associa i percorsi agli URL di origine. Se due fascicoli
-con URL diversi produrrebbero lo stesso percorso, il secondo viene segnalato
-come errore invece di sovrascrivere il primo. Non eliminare questo registro
-per forzare una sovrascrittura. Un numero o tipo non riconosciuto viene
-segnalato come errore, senza creare un nome arbitrario.
+### Eccezione per gli URL ASP del 1999–2006
 
-I precedenti file con nomi basati su hash o organizzati in cartelle BUR_NUMERO
-non vengono cancellati o rinominati.
-Una nuova esecuzione genera i nomi descrittivi riutilizzando i download in cache.
+Gli URL storici `archivioDettaglio.asp?num=5&nodo=73` non includono `bnum`,
+né una data o un numero di BUR affidabili. Per questi documenti si usano gli
+identificativi dell'URL e la cartella dell'annualità di archivio, per esempio
+`1999/BUR_legacy_5_73_supplemento_ordinario.pdf` e `.txt`.
+Le date e il numero di BUR non vengono ricostruiti dal titolo. Gli URL moderni
+con `bnum` assente o non valido sono segnalati come errori.
 
-
+`file_sources.json` associa i percorsi agli URL di origine e impedisce di
+sovrascrivere un fascicolo diverso in caso di collisione.
+I file creati con le precedenti convenzioni non vengono cancellati o rinominati.
+Una nuova esecuzione genera i nuovi nomi riutilizzando i download in cache.
 
 
 ## Tipo del fascicolo dai metadati PDF
@@ -239,10 +237,10 @@ titolo, viene letto lo stesso campo `/Title` tramite `pypdf`.
 Non è necessario installare Poppler per usare lo script.
 
 Se il titolo PDF non identifica un tipo, per esempio `bur-99.PDF`, viene
-usato il titolo della pagina del fascicolo. Numero e anno restano quelli
-del fascicolo nell'archivio. Se i metadati indicano solo “Supplemento”,
+usato il titolo della pagina del fascicolo. Numero, anno, giorno e mese provengono dall'URL
+come descritto sopra; l'archivio ASP usa gli identificativi storici. Se i metadati indicano solo “Supplemento”,
 TYPE diventa `supplemento`, senza aggiungere un sottotipo non esplicitato.
-Esempio: `2026/BUR_30-2026-supplemento.pdf`.
+Esempio: `2026/BUR_30_19_10_supplemento.pdf`.
 
 Gli indici CSV/JSON includono `titolo_pdf`, `tipo_fascicolo` e `fonte_tipo`
 (`pdfinfo`, `pdf_metadata` o `titolo_pagina`). `tipo_documento` mantiene il
@@ -250,3 +248,4 @@ significato di sommario separato oppure ripiego sulle pagine dell'integrale.
 Questa inferenza dipende dalla qualità dei metadati pubblicati dalla Regione.
 I vecchi file non vengono rinominati; la nuova esecuzione riusa la cache per
 generare i nuovi percorsi.
+
