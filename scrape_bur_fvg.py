@@ -12,13 +12,17 @@ import json
 import logging
 import re
 import ssl
+import random
 import time
 from collections import deque
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
+from http.client import HTTPException
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPSHandler
 from pypdf import PdfReader
 
@@ -123,11 +127,9 @@ def pagination(page, base, year):
     return sorted(out)
 
 
-def tls_context(ca_file=None, use_certifi=False):
+def tls_context(ca_file=None, use_certifi=False, insecure=False):
     """Mantiene il trust di sistema e aggiunge un bundle CA se richiesto."""
     context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
     if use_certifi:
         try:
             import certifi
@@ -136,18 +138,48 @@ def tls_context(ca_file=None, use_certifi=False):
         context.load_verify_locations(cafile=certifi.where())
     if ca_file:
         context.load_verify_locations(cafile=str(ca_file))
+    if insecure:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
     return context
+
+
+class InvalidResponseError(ValueError):
+    """Risposta vuota, incompleta o diversa dal documento richiesto."""
+
+
+RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
+
+
+def retry_after_seconds(headers):
+    """Interpreta Retry-After in secondi o come data HTTP."""
+    value = headers.get('Retry-After') if headers else None
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+        return max(0.0, seconds) if seconds < float('inf') else None
+    except (TypeError, ValueError):
+        try:
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            return max(0.0, (date - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
 
 
 class Client:
     def __init__(self, root, delay, timeout, retries, refresh=False,
-                 ca_file=None, use_certifi=False):
+                 ca_file=None, use_certifi=False, retry_backoff=2.0, retry_max_wait=60.0,
+                 insecure=False):
         self.cache = root / 'cache'
         self.cache.mkdir(parents=True, exist_ok=True)
         self.opener = build_opener(HTTPCookieProcessor(CookieJar()),
-                                   HTTPSHandler(context=tls_context(ca_file, use_certifi)))
+                                   HTTPSHandler(context=tls_context(ca_file, use_certifi, insecure)))
         self.delay, self.timeout, self.retries = delay, timeout, retries
         self.refresh = refresh
+        self.retry_backoff, self.retry_max_wait = retry_backoff, retry_max_wait
         self.last = 0.0
 
     def get(self, url, pdf=False):
@@ -168,14 +200,13 @@ class Client:
                     if urlsplit(response.url).hostname not in HOSTS:
                         raise ValueError('Redirect fuori dai domini regionali')
                     data = response.read()
+                    expected = response.headers.get('Content-Length')
+                    if expected and expected.isdigit() and len(data) != int(expected):
+                        raise InvalidResponseError('Download incompleto')
                 if pdf and not data.lstrip().startswith(b'%PDF-'):
-                    raise ValueError('Il server ha restituito HTML o un file non PDF')
+                    raise InvalidResponseError('Il server ha restituito HTML o un file non PDF')
                 if not pdf and b'<html' not in data.lower():
-                    raise ValueError('Risposta non HTML')
-                tmp = path.with_suffix('.tmp')
-                tmp.write_bytes(data)
-                tmp.replace(path)
-                return data
+                    raise InvalidResponseError('Risposta non HTML')
             except Exception as exc:
                 reason = exc.reason if isinstance(exc, URLError) else exc
                 if isinstance(reason, ssl.SSLCertVerificationError):
@@ -186,9 +217,32 @@ class Client:
                         'Con proxy aziendale, usare --ca-file /percorso/ca-aziendale.pem '
                         'con un certificato fornito dal proprio amministratore.'
                     ) from exc
-                if attempt == self.retries:
+                # Errori permanenti (es. 404) e problemi locali non migliorano
+                # ripetendo la richiesta. Nessun log per i tentativi intermedi.
+                retryable = (exc.code in RETRYABLE_HTTP if isinstance(exc, HTTPError)
+                             else isinstance(exc, (URLError, TimeoutError,
+                                                   ConnectionError, HTTPException,
+                                                   InvalidResponseError)))
+                requested_wait = (retry_after_seconds(exc.headers)
+                                  if isinstance(exc, HTTPError) else None)
+                if isinstance(exc, HTTPError):
+                    exc.close()
+                if not retryable or attempt == self.retries:
                     raise
-                time.sleep(min(30, 2 ** (attempt + 1)))
+                if requested_wait is None:
+                    pause = min(self.retry_max_wait,
+                                self.retry_backoff * 2 ** min(attempt, 30))
+                    pause = min(self.retry_max_wait, pause + random.uniform(0, pause * 0.2))
+                else:
+                    pause = min(self.retry_max_wait, requested_wait)
+                time.sleep(pause)
+                continue
+            # Cache solo dopo un download completo. Un errore del filesystem
+            # deve emergere subito, senza ripetere richieste di rete riuscite.
+            tmp = path.with_suffix('.tmp')
+            tmp.write_bytes(data)
+            tmp.replace(path)
+            return data
         raise RuntimeError('Download fallito')
 
     def page(self, url):
@@ -299,8 +353,16 @@ def main():
     ap.add_argument('--al', type=int, default=2026)
     ap.add_argument('--output', type=Path, default=Path('bur_fvg'))
     ap.add_argument('--delay', type=float, default=1.0)
-    ap.add_argument('--timeout', type=float, default=45)
-    ap.add_argument('--retries', type=int, default=3)
+    ap.add_argument('--timeout', type=float, default=30,
+                    help='Timeout delle operazioni socket in secondi (default: 30)')
+    ap.add_argument('--retries', type=int, default=5,
+                    help='Ritentativi silenziosi dopo il primo tentativo (default: 5)')
+    ap.add_argument('--retry-backoff', type=float, default=2.0,
+                    help='Pausa iniziale fra ritentativi in secondi (default: 2)')
+    ap.add_argument('--retry-max-wait', type=float, default=60.0,
+                    help='Pausa massima fra ritentativi in secondi (default: 60)')
+    ap.add_argument('--insecure', action='store_true',
+                    help='Disabilita esplicitamente la verifica TLS per questa esecuzione')
     ca = ap.add_mutually_exclusive_group()
     ca.add_argument('--ca-file', type=Path, help='Bundle CA PEM aggiuntivo, anche per proxy aziendali')
     ca.add_argument('--certifi', action='store_true', help='Aggiunge il bundle CA del pacchetto certifi')
@@ -313,7 +375,10 @@ def main():
     args = ap.parse_args()
     if not 1999 <= args.dal <= args.al <= 2026:
         ap.error('Intervallo consentito: 1999–2026')
-    if min(args.delay, args.retries, args.legacy_pages, args.limit) < 0 or args.timeout <= 0:
+    numeric = (args.delay, args.timeout, args.retry_backoff, args.retry_max_wait)
+    if (not all(0 <= v < float('inf') for v in numeric)
+            or min(args.retries, args.legacy_pages, args.limit) < 0
+            or args.timeout <= 0 or args.retry_max_wait <= 0):
         ap.error('Parametri numerici non validi')
     root = args.output
     root.mkdir(parents=True, exist_ok=True)
@@ -321,7 +386,9 @@ def main():
                         handlers=[logging.StreamHandler(), logging.FileHandler(root/'scraping.log', encoding='utf-8')])
     try:
         client = Client(root, args.delay, args.timeout, args.retries, args.refresh,
-                        ca_file=args.ca_file, use_certifi=args.certifi)
+                        ca_file=args.ca_file, use_certifi=args.certifi,
+                        retry_backoff=args.retry_backoff, retry_max_wait=args.retry_max_wait,
+                        insecure=args.insecure)
         home = client.page(HOME)
     except Exception as exc:
         LOG.error('Impossibile inizializzare il download: %s', exc)
@@ -364,3 +431,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
