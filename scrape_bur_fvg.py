@@ -325,21 +325,33 @@ def pdf_document_title(data, reader):
     return (clean(str(title)), 'pdf_metadata') if title else ('', '')
 
 
-def document_basename(root, year, title, document_type=None):
-    """Numero dal fascicolo; tipo dai metadati PDF quando disponibile."""
-    title = clean(title).upper()
-    number = re.search(r'\b(?:NUMERO|N[.°º]?)\s*(\d+)', title)
-    if not number:
-        raise ValueError('Numero del fascicolo non riconosciuto: ' + title)
-    kind = document_type or infer_document_type(title)
-    if kind not in {'ordinario', 'straordinario', 'supplemento',
-                    'supplemento_ordinario', 'supplemento_straordinario'}:
-        raise ValueError('Tipo del fascicolo non riconosciuto: ' + title)
-    return root / str(year) / f'BUR_{int(number.group(1))}-{year}-{kind}'
+def document_basename(root, source_url, document_type, archive_year=None):
+    """Identita dal solo URL; metadati e titolo determinano esclusivamente TYPE."""
+    if document_type not in {'ordinario', 'straordinario', 'supplemento',
+                             'supplemento_ordinario', 'supplemento_straordinario'}:
+        raise ValueError('Tipo del fascicolo non riconosciuto')
+    parsed = urlsplit(source_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if 'bnum' in query:
+        match = re.fullmatch(r'(\d{4})/(\d{1,2})/(\d{1,2})/(\d+)', query['bnum'])
+        if not match:
+            raise ValueError('Parametro bnum non valido: ' + query['bnum'])
+        year, month, day, number = map(int, match.groups())
+        datetime(year, month, day)  # Rifiuta date non valide.
+        return root / str(year) / f'BUR_{number}_{day:02d}_{month:02d}_{document_type}'
+    # Gli URL ASP storici non contengono data e numero del BUR: si usano
+    # esclusivamente i loro identificativi, senza ricostruirli dal titolo.
+    if parsed.path.lower().endswith('/archiviodettaglio.asp'):
+        num, nodo = query.get('num', ''), query.get('nodo', '')
+        if (not num.isdigit() or not nodo.isdigit()
+                or not re.fullmatch(r'\d{4}', str(archive_year))):
+            raise ValueError('URL storico privo di identificativi validi o anno archivio')
+        return root / str(archive_year) / f'BUR_legacy_{int(num)}_{int(nodo)}_{document_type}'
+    raise ValueError('URL privo di bnum e non appartenente al dettaglio ASP storico')
 
 
 def save_document_files(root, base, source_url, data, text):
-    """Evita di sovrascrivere un altro fascicolo con numero/anno/tipo uguali."""
+    """Evita di sovrascrivere un altro fascicolo con lo stesso percorso derivato dall URL."""
     registry_path = root / 'file_sources.json'
     registry = json.loads(registry_path.read_text(encoding='utf-8')) if registry_path.exists() else {}
     pdfpath, txtpath = base.with_suffix('.pdf'), base.with_suffix('.txt')
@@ -400,7 +412,7 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         row['titolo_pdf'] = pdf_title
         row['fonte_tipo'] = metadata_source if kind else 'titolo_pagina'
         kind = kind or infer_document_type(title)
-        base = document_basename(root, year, title, document_type=kind)
+        base = document_basename(root, url, kind, archive_year=year)
         row['tipo_fascicolo'] = kind
         count = len(reader.pages)
         row['pagine_pdf'] = count
@@ -513,6 +525,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
