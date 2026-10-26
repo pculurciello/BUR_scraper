@@ -103,3 +103,47 @@ il riconoscimento della paginazione e dei supplementi ordinari e straordinari,
 il download con estrazione del sommario di un supplemento del 2026 e il
 ripiego sul PDF integrale di un supplemento del 1999.
 Non è stata eseguita la raccolta completa 1999–2026.
+
+
+## Errore SSL: CERTIFICATE_VERIFY_FAILED
+
+Questo errore indica che Python non riesce a costruire una catena di fiducia
+per il certificato presentato dal sito o dal proxy. Può dipendere dai
+certificati CA dell'installazione Python, da un proxy aziendale oppure dalla
+catena inviata dal server; il solo messaggio non identifica la causa.
+
+Aggiornare lo script e provare con il bundle CA di certifi:
+
+```bash
+python -m pip install --upgrade certifi
+python scrape_bur_fvg.py --dal 1999 --al 2026 --output bur_fvg --certifi
+```
+
+Usare lo stesso interprete Python per l'installazione e per lo script.
+L'opzione `--certifi` aggiunge le CA di certifi al trust predefinito di Python;
+non disabilita la verifica dei certificati o del nome host.
+Non è garantito che risolva una catena incompleta inviata dal server.
+
+Se la connessione attraversa un proxy che usa una CA privata, richiedere
+all'amministratore il relativo certificato CA in formato PEM e usare:
+
+```bash
+python scrape_bur_fvg.py --dal 1999 --al 2026 --output bur_fvg --ca-file /percorso/ca-aziendale.pem
+```
+
+Il file deve contenere certificati CA attendibili, non chiavi private.
+`--ca-file` aggiunge le CA indicate al trust predefinito.
+Le opzioni `--certifi` e `--ca-file` sono alternative.
+È possibile anche configurare il trust di Python tramite `SSL_CERT_FILE`.
+Per ispezionare i percorsi usati dall'interprete:
+
+```bash
+python -c "import ssl; print(ssl.get_default_verify_paths())"
+```
+
+Con Python installato da python.org su macOS, eseguire anche il comando
+`Install Certificates.command` presente nella cartella della propria versione
+Python, se disponibile. Se il problema persiste anche con CA aggiornate,
+verificare la catena del server e l'eventuale proxy con l'amministratore.
+Gli errori di verifica TLS producono un messaggio specifico senza ritentativi
+inutili. La verifica TLS resta sempre abilitata.
