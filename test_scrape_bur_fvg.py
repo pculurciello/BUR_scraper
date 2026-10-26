@@ -103,4 +103,57 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(bur.retry_after_seconds({'Retry-After':'5'}), 5)
         self.assertEqual(bur.retry_after_seconds({'Retry-After':'Wed, 21 Oct 2015 07:28:00 GMT'}), 0)
 
+class NamingTests(unittest.TestCase):
+    def test_paths_for_ordinary_and_supplements(self):
+        cases = [
+            (2026, 'NUMERO 42 - 21 OTTOBRE 2026', 'BUR_42/2026_ordinario'),
+            (2026, 'I SUPPLEMENTO ORDINARIO N. 30 DEL 19 OTTOBRE 2026 AL BUR N. 41',
+             'BUR_30/2026_supplemento_ordinario'),
+            (1999, 'SUPPLEMENTO STRAORDINARIO N.4 DEL 22 APRILE 1999 AL BUR N.16',
+             'BUR_4/1999_supplemento_straordinario'),
+            (2026, 'V SUPPLEMENTO ORDINARIO N. 1 DI DATA 2 GENNAIO 2026 AL BUR N. 53 DI DATA 31 DICEMBRE 2025',
+             'BUR_1/2026_supplemento_ordinario'),
+            (2026, 'SUPPLEMENTO N. 2', 'BUR_2/2026_supplemento'),
+        ]
+        for year, title, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(bur.document_basename(Path('out'), year, title), Path('out')/expected)
+
+    def test_unknown_metadata_is_rejected(self):
+        for title in ['Documento senza numero', 'Documento N. 42']:
+            with self.subTest(title=title):
+                with self.assertRaises(ValueError): bur.document_basename(Path('out'), 2026, title)
+
+    def test_collision_does_not_overwrite_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = bur.document_basename(root, 2026, 'NUMERO 42')
+            pdf, txt = bur.save_document_files(root, base, 'source-a', b'pdf-a', 'text-a')
+            with self.assertRaisesRegex(ValueError, 'Collisione'):
+                bur.save_document_files(root, base, 'source-b', b'pdf-b', 'text-b')
+            self.assertEqual(pdf.read_bytes(), b'pdf-a')
+            self.assertEqual(txt.read_text(), 'text-a')
+            bur.save_document_files(root, base, 'source-a', b'pdf-a', 'text-a')
+
+    def test_fetch_summary_records_new_paths(self):
+        from pypdf import PdfWriter
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        buf = io.BytesIO()
+        writer.write(buf)
+        title = 'NUMERO 42 - 21 OTTOBRE 2026'
+        client = Mock()
+        client.page.return_value = bur.Page(
+            '<div class="box-titolo">' + title + '</div>'
+            '<a href="/newbur/downloadPDF?doc=0&amp;name=test.pdf">Sommario</a>')
+        client.get.return_value = buf.getvalue()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            row = bur.fetch_summary(client, 2026, bur.HOME, title, root, 12)
+            self.assertEqual(row['pdf'], 'BUR_42/2026_ordinario.pdf')
+            self.assertEqual(row['testo'], 'BUR_42/2026_ordinario.txt')
+            self.assertTrue((root/row['pdf']).is_file())
+            self.assertTrue((root/row['testo']).is_file())
+
 if __name__ == '__main__': unittest.main()
+
