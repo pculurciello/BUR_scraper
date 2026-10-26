@@ -106,14 +106,14 @@ class RetryTests(unittest.TestCase):
 class NamingTests(unittest.TestCase):
     def test_paths_for_ordinary_and_supplements(self):
         cases = [
-            (2026, 'NUMERO 42 - 21 OTTOBRE 2026', 'BUR_42/2026_ordinario'),
+            (2026, 'NUMERO 42 - 21 OTTOBRE 2026', '2026/BUR_42-2026-ordinario'),
             (2026, 'I SUPPLEMENTO ORDINARIO N. 30 DEL 19 OTTOBRE 2026 AL BUR N. 41',
-             'BUR_30/2026_supplemento_ordinario'),
+             '2026/BUR_30-2026-supplemento_ordinario'),
             (1999, 'SUPPLEMENTO STRAORDINARIO N.4 DEL 22 APRILE 1999 AL BUR N.16',
-             'BUR_4/1999_supplemento_straordinario'),
+             '1999/BUR_4-1999-supplemento_straordinario'),
             (2026, 'V SUPPLEMENTO ORDINARIO N. 1 DI DATA 2 GENNAIO 2026 AL BUR N. 53 DI DATA 31 DICEMBRE 2025',
-             'BUR_1/2026_supplemento_ordinario'),
-            (2026, 'SUPPLEMENTO N. 2', 'BUR_2/2026_supplemento'),
+             '2026/BUR_1-2026-supplemento_ordinario'),
+            (2026, 'SUPPLEMENTO N. 2', '2026/BUR_2-2026-supplemento'),
         ]
         for year, title, expected in cases:
             with self.subTest(title=title):
@@ -150,10 +150,11 @@ class NamingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             row = bur.fetch_summary(client, 2026, bur.HOME, title, root, 12)
-            self.assertEqual(row['pdf'], 'BUR_42/2026_ordinario.pdf')
-            self.assertEqual(row['testo'], 'BUR_42/2026_ordinario.txt')
+            self.assertEqual(row['pdf'], '2026/BUR_42-2026-ordinario.pdf')
+            self.assertEqual(row['testo'], '2026/BUR_42-2026-ordinario.txt')
             self.assertTrue((root/row['pdf']).is_file())
             self.assertTrue((root/row['testo']).is_file())
 
 if __name__ == '__main__': unittest.main()
+
 
