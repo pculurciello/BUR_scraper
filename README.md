@@ -222,8 +222,8 @@ identificativi dell'URL e la cartella dell'annualità di archivio, per esempio
 Le date e il numero di BUR non vengono ricostruiti dal titolo. Gli URL moderni
 con `bnum` assente o non valido sono segnalati come errori.
 
-`file_sources.json` associa i percorsi agli URL di origine e impedisce di
-sovrascrivere un fascicolo diverso in caso di collisione.
+`file_sources.json` associa i percorsi agli URL di origine e conserva
+l'assegnazione dei suffissi descritta sotto.
 I file creati con le precedenti convenzioni non vengono cancellati o rinominati.
 Una nuova esecuzione genera i nuovi nomi riutilizzando i download in cache.
 
@@ -249,3 +249,29 @@ Questa inferenza dipende dalla qualità dei metadati pubblicati dalla Regione.
 I vecchi file non vengono rinominati; la nuova esecuzione riusa la cache per
 generare i nuovi percorsi.
 
+
+
+
+## Documenti con stessa data, numero e tipo
+
+Il parametro `bnum` può terminare con identificativi come `1_1` o `1_2`.
+Il numero di base rimane `1`; i segmenti aggiuntivi identificano documenti
+diversi e non vengono interpretati come un nuovo numero di BUR.
+
+Se più documenti produrrebbero lo stesso nome (anno, numero, giorno, mese e
+TYPE uguali), il primo usa il nome base, il secondo `_2`, il terzo `_3`, ecc.,
+prima dell'estensione e con lo stesso suffisso per PDF e TXT. Per esempio,
+con TYPE `supplemento`:
+
+- `2020/BUR_1_02_01_supplemento.pdf`
+- `2020/BUR_1_02_01_supplemento_2.pdf`
+- `2020/BUR_1_02_01_supplemento_3.pdf`
+
+L'assegnazione dipende dall'ordine di elaborazione iniziale. Nei rerun, il
+registro `file_sources.json` permette a ciascun URL di conservare il proprio
+nome, anche se l'ordine cambia. Forme codificate con `%2F` e non codificate
+dello stesso URL vengono normalizzate. File già presenti senza provenienza
+registrata sono preservati e il relativo nome viene saltato.
+
+Documenti con TYPE diversi hanno già nomi distinti e non richiedono suffissi.
+Non cancellare `file_sources.json` se vuoi mantenere le assegnazioni dei nomi.
