@@ -333,7 +333,7 @@ def document_basename(root, source_url, document_type, archive_year=None):
     parsed = urlsplit(source_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     if 'bnum' in query:
-        match = re.fullmatch(r'(\d{4})/(\d{1,2})/(\d{1,2})/(\d+)', query['bnum'])
+        match = re.fullmatch(r'(\d{4})/(\d{1,2})/(\d{1,2})/(\d+)(?:_\d+)*', query['bnum'])
         if not match:
             raise ValueError('Parametro bnum non valido: ' + query['bnum'])
         year, month, day, number = map(int, match.groups())
@@ -351,25 +351,40 @@ def document_basename(root, source_url, document_type, archive_year=None):
 
 
 def save_document_files(root, base, source_url, data, text):
-    """Evita di sovrascrivere un altro fascicolo con lo stesso percorso derivato dall URL."""
+    """Assegna _2, _3, ... alle collisioni e conserva la scelta nei rerun."""
+    source_url = canonical(source_url)
     registry_path = root / 'file_sources.json'
     registry = json.loads(registry_path.read_text(encoding='utf-8')) if registry_path.exists() else {}
-    pdfpath, txtpath = base.with_suffix('.pdf'), base.with_suffix('.txt')
-    key = pdfpath.relative_to(root).as_posix()
-    owner = registry.get(key)
-    if owner is not None and owner != source_url:
-        raise ValueError(f'Collisione del nome {key}: gia assegnato a {owner}')
-    payloads = ((pdfpath, data), (txtpath, text.encode('utf-8')))
-    if owner is None:
-        for path, payload in payloads:
-            if path.exists() and path.read_bytes() != payload:
-                raise ValueError(f'File preesistente senza provenienza verificabile: {path}')
-    base.parent.mkdir(parents=True, exist_ok=True)
-    for path, payload in payloads:
+    # Prima recupera un'assegnazione precedente per questo URL, anche se
+    # l'ordine dei documenti cambia o si libera un nome con suffisso inferiore.
+    assigned = None
+    for key, owner in registry.items():
+        relative = Path(key)
+        if relative.parent != base.parent.relative_to(root):
+            continue
+        match = re.fullmatch(re.escape(base.name) + r'(?:_(\d+))?\.pdf', relative.name)
+        if (match and (match.group(1) is None or int(match.group(1)) >= 2)
+                and owner == source_url):
+            assigned = root / relative.with_suffix('')
+            break
+    if assigned is None:
+        index = 1
+        while True:
+            candidate = base if index == 1 else base.with_name(f'{base.name}_{index}')
+            pdfpath, txtpath = candidate.with_suffix('.pdf'), candidate.with_suffix('.txt')
+            key = pdfpath.relative_to(root).as_posix()
+            # I file senza provenienza registrata sono occupati: non sovrascriverli.
+            if key not in registry and not pdfpath.exists() and not txtpath.exists():
+                assigned = candidate
+                break
+            index += 1
+    pdfpath, txtpath = assigned.with_suffix('.pdf'), assigned.with_suffix('.txt')
+    assigned.parent.mkdir(parents=True, exist_ok=True)
+    for path, payload in ((pdfpath, data), (txtpath, text.encode('utf-8'))):
         tmp = path.with_suffix(path.suffix + '.tmp')
         tmp.write_bytes(payload)
         tmp.replace(path)
-    registry[key] = source_url
+    registry[pdfpath.relative_to(root).as_posix()] = source_url
     tmp = registry_path.with_suffix('.tmp')
     tmp.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding='utf-8')
     tmp.replace(registry_path)
@@ -525,6 +540,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
