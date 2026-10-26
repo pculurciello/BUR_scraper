@@ -287,7 +287,7 @@ def discover(client, year, seed, errors):
 
 
 def document_basename(root, year, title):
-    """Lo slash richiesto separa la cartella BUR_NUMERO dal nome del file."""
+    """Raggruppa per anno; il nome contiene numero, anno e tipo."""
     title = clean(title).upper()
     number = re.search(r'\b(?:NUMERO|N[.°º]?)\s*(\d+)', title)
     if not number:
@@ -305,7 +305,7 @@ def document_basename(root, year, title):
         kind = 'ordinario'
     else:
         raise ValueError('Tipo del fascicolo non riconosciuto: ' + title)
-    return root / f'BUR_{int(number.group(1))}' / f'{year}_{kind}'
+    return root / str(year) / f'BUR_{int(number.group(1))}-{year}-{kind}'
 
 
 def save_document_files(root, base, source_url, data, text):
@@ -475,5 +475,6 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
