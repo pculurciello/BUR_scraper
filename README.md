@@ -287,3 +287,39 @@ normalizzati allo stesso URL: la pagina non viene scaricata due volte e non
 produce la falsa anomalia “Elenco identico” tra alias implicito e pagina 1.
 Il controllo degli elenchi identici tra pagine distinte rimane attivo.
 L'archivio ASP storico mantiene il proprio schema di paginazione.
+
+
+
+## Titolo del dettaglio diverso da quello nell'archivio
+
+Un titolo discordante non impedisce piu il download. Lo script rilegge una
+volta la pagina del dettaglio bypassando la cache locale e inviando gli header
+`Cache-Control: no-cache` e `Pragma: no-cache`. Anche `--refresh` invia questi
+header. Un server o proxy puo comunque restituire contenuti incoerenti.
+
+Se la discordanza persiste, il sommario viene scaricato dal link presente
+nel dettaglio e salvato usando data e numero dell'URL richiesto. Il titolo
+non sostituisce questi identificativi. Il record CSV/JSON contiene:
+
+- `titolo`: titolo nell'archivio;
+- `titolo_dettaglio`: titolo osservato nella pagina usata;
+- `titolo_discordante`: indicatore della discordanza persistente;
+- `avviso`: spiegazione non bloccante e richiesta di verifica.
+
+Se il documento sarebbe stato `ok`, diventa `da_verificare`; i casi senza
+text layer mantengono `ocr_necessario`. Il PDF e il TXT sono comunque salvati,
+salvo altri errori di download, lettura o scrittura. Un fallimento della
+rilettura fresca lascia utilizzabile la risposta gia ottenuta.
+
+Il solo messaggio non permette di distinguere tra cache locale, risposta
+errata del server/proxy e metadati incoerenti. Il link PDF potrebbe anch'esso
+riferirsi a un altro fascicolo: controllare i record discordanti prima di usare
+i documenti come fonte. Per recuperare i documenti saltati in precedenza,
+rieseguire lo script per l'annualita interessata con la stessa directory di output:
+
+```bash
+python scrape_bur_fvg.py --dal 2021 --al 2021 --output bur_fvg
+```
+
+Come per gli altri rerun, gli indici della directory vengono riscritti per
+l'intervallo richiesto; i PDF e TXT delle altre annualita non vengono cancellati.
