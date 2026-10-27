@@ -27,10 +27,14 @@ source .venv/bin/activate
 python -m pip install -r requirements-extraction.txt
 ```
 
-L'estrattore usa la libreria standard per l'API; non richiede il client OpenAI.
-Le dipendenze documentali sono importate soltanto per il formato richiesto.
-Sono supportati TXT, Markdown, PDF con testo, HTML/HTM, XML e DOCX. I PDF
-scansionati richiedono OCR preventivo; lo script non esegue OCR.
+L'estrattore usa soltanto la libreria standard Python e legge **esclusivamente
+file `.txt`** (estensione senza distinzione tra maiuscole e minuscole). Il file
+`requirements-extraction.txt` non contiene dipendenze. Non importa `pypdf`,
+non apre PDF e non effettua conversione PDF/testo né OCR. I PDF vengono registrati
+come saltati anche quando manca il TXT corrispondente o quando questo è vuoto.
+Per gli input TXT vuoti viene segnalato un errore: rigenerare il testo prima
+dell'estrazione. I TXT UTF-8 (anche con BOM) vengono letti direttamente; per file
+non UTF-8 è previsto un ripiego CP1252.
 
 ## Configurazione vLLM e modello
 
@@ -95,12 +99,14 @@ sulle prime pagine dell'integrale o i titoli discordanti. Gli anni indicano
 la raccolta da fornire: l'estrattore non impone un filtro cronologico, perché
 una voce del 2026 può richiamare una legge antecedente al 1999.
 
-Quando trova un PDF e un TXT UTF-8 non vuoto con lo stesso nome base, preferisce
-il TXT e registra il PDF come saltato. Questo evita di elaborare entrambe le
-copie prodotte dallo scraper. Se il TXT non è leggibile in UTF-8 o è vuoto,
-il PDF resta elaborabile. Le directory `cache`, `.git` e `__pycache__` sono
-escluse; CSV, JSON e gli altri formati non supportati sono registrati come
-saltati. Usare una directory di output dedicata, diversa dall'input.
+Sono elaborati soltanto i TXT. I PDF sono sempre ignorati, senza ripiego sulla
+conversione e senza necessità di abbinare i nomi; quindi PDF e TXT dello stesso
+bollettino non producono doppie elaborazioni. In `inventory.jsonl` il motivo del
+salto dei PDF è `pdf_ignored_text_only`. Gli altri formati (inclusi HTML, XML,
+DOCX, CSV e JSON) sono registrati come `unsupported_format`. Le directory `cache`,
+`.git` e `__pycache__` sono escluse. Usare una directory di output dedicata,
+diversa dall'input. Se un bollettino ha soltanto il PDF, occorre produrne il TXT
+prima di usare questo estrattore; il PDF saltato da solo non genera codice 2.
 
 ## Opzioni
 
@@ -153,7 +159,7 @@ Una decisione comprende:
 ```
 
 L'esempio è inventato e non identifica un atto reale. Gli offset `start` e `end`
-sono indici Python (fine esclusa) nel testo estratto e normalizzato, non nei byte
+sono indici Python (fine esclusa) nel testo TXT letto e normalizzato, non nei byte
 originali né nelle pagine del PDF. Il codice sostituisce CRLF, spazi non separabili
 e trattini morbidi prima del filtro.
 
@@ -186,8 +192,8 @@ progressivamente; un'interruzione conserva le risposte già in cache.
 
 Prima del censimento completo, annotare manualmente un campione di anni e
 formati e misurare precisione e richiamo, includendo anche voci scartate dalle
-regex. Voci su più colonne, intestazioni spezzate o assenti, estrazione PDF
-imprecisa, OCR parziale e lessico non coperto possono causare omissioni.
+regex. Voci su più colonne, intestazioni spezzate o assenti, testo TXT
+impreciso, OCR parziale preesistente e lessico non coperto possono causare omissioni.
 L'estrattore lavora sui sommari: non recupera informazioni presenti soltanto
 nel testo integrale. Per grandi archivi la lista dei candidati è mantenuta in
 memoria e può richiedere esecuzioni separate per anno, con output distinti.
@@ -202,5 +208,6 @@ python -m unittest -v test_extract_bur_grants.py test_scrape_bur_fvg.py
 
 I test non contattano siti o modelli reali. Coprono tipi di atto, separazione
 delle voci, finestre e offset, validazione delle prove, API simulata e cache,
-errori API e integrazione con le coppie PDF/TXT dello scraper. La raccolta
+errori API, integrazione con le coppie PDF/TXT dello scraper, PDF sempre
+ignorati e assenza di ripiego sui PDF quando il TXT è vuoto. La raccolta
 1999–2026 e l'inferenza con vLLM reale non sono state eseguite per questa aggiunta.

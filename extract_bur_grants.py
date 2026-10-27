@@ -43,29 +43,13 @@ include richiede almeno un riferimento; usa uncertain se il testo non basta.'''
 
 
 def read(path):
-    suffix = path.suffix.lower()
-    if suffix == '.pdf':
-        from pypdf import PdfReader
-        return '\n'.join(p.extract_text() or '' for p in PdfReader(path).pages)
-    if suffix == '.docx':
-        from docx import Document
-        from docx.oxml.ns import qn
-        return '\n'.join(' '.join(n.text or '' for n in block.iter(qn('w:t')))
-                         for block in Document(path).element.body)
+    if path.suffix.lower() != '.txt':
+        raise ValueError('Only TXT input is supported; PDFs are not converted')
     data = path.read_bytes()
     try:
         text = data.decode('utf-8-sig')
     except UnicodeDecodeError:
         text = data.decode('cp1252', errors='replace')
-    if suffix in {'.html', '.htm', '.xml'}:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(text, 'html.parser')
-        for tag in soup(['script', 'style']):
-            tag.decompose()
-        for tag in soup.find_all(['p', 'div', 'li', 'tr', 'br', 'h1', 'h2', 'h3']):
-            tag.insert_before('\n')
-            tag.insert_after('\n')
-        text = soup.get_text(' ')
     return text
 
 
@@ -159,27 +143,16 @@ def main():
                 continue
             source = str(path.relative_to(args.input))
             record = {'source': source}
-            supported = {'.pdf', '.txt', '.md', '.html', '.htm', '.xml', '.docx'}
+            supported = {'.txt'}
             if path.suffix.lower() not in supported:
-                record.update(status='skipped', reason='unsupported_format')
+                record.update(status='skipped', reason=('pdf_ignored_text_only' if path.suffix.lower() == '.pdf'
+                                                     else 'unsupported_format'))
                 inventory.write(json.dumps(record, ensure_ascii=False) + '\n')
                 continue
-            paired = path.with_suffix('.txt')
-            if path.suffix.lower() == '.pdf' and paired.is_file():
-                try:
-                    use_text = bool(paired.read_text(encoding='utf-8-sig').strip())
-                except (OSError, UnicodeError):
-                    use_text = False
-                if use_text:
-                    record.update(status='skipped', reason='paired_text_preferred')
-                    inventory.write(json.dumps(record, ensure_ascii=False) + '\n')
-                    continue
             try:
-                if path.suffix.lower() not in {'.pdf', '.txt', '.md', '.html', '.htm', '.xml', '.docx'}:
-                    raise ValueError('Unsupported file format')
                 text = read(path).replace('\r\n', '\n').replace('\u00ad', '').replace('\xa0', ' ')
                 if not text.strip():
-                    raise ValueError('Empty text: scanned PDFs require OCR')
+                    raise ValueError('Empty TXT file: regenerate the bulletin text before extraction')
                 items = [{**c, 'source': source} for c in candidates(text)]
                 pending.extend(items)
                 record.update(status='ok', characters=len(text), candidates=len(items))

@@ -1,3 +1,2 @@
-beautifulsoup4>=4.12,<5
-pypdf>=5,<7
-python-docx>=1.1,<2
+# The TXT-only extractor uses the Python standard library (Python >=3.10).
+# No client dependencies. Install vLLM separately on the inference server.

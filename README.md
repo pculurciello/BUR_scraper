@@ -327,7 +327,8 @@ l'intervallo richiesto; i PDF e TXT delle altre annualita non vengono cancellati
 
 ## Estrazione degli atti relativi a contributi con vLLM
 
-`extract_bur_grants.py` seleziona le voci candidate con regex e conferma tramite
+`extract_bur_grants.py` legge soltanto i TXT già presenti (ignora sempre i PDF,
+senza convertirli), seleziona le voci candidate con regex e conferma tramite
 un modello servito da vLLM i riferimenti a leggi, decreti presidenziali e di
 direttori, e deliberazioni relative a contributi. Conserva prove testuali,
 fonti, decisioni incerte e errori per revisione.

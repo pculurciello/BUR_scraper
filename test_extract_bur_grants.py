@@ -51,10 +51,35 @@ class Tests(unittest.TestCase):
             inventory = [json.loads(line) for line in (output / 'inventory.jsonl').read_text().splitlines()]
             self.assertEqual(len(inventory), 3)
             self.assertEqual({r.get('reason') for r in inventory if r['status'] == 'skipped'},
-                             {'paired_text_preferred', 'unsupported_format'})
+                             {'pdf_ignored_text_only', 'unsupported_format'})
             candidates = [json.loads(line) for line in (output / 'candidates.jsonl').read_text().splitlines()]
             self.assertEqual(len(candidates), 1)
             self.assertTrue(candidates[0]['source'].endswith('.txt'))
+
+    def test_pdf_reader_is_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = Path(tmp) / 'bulletin.pdf'
+            pdf.write_bytes(b'not a real PDF')
+            with self.assertRaisesRegex(ValueError, 'Only TXT'):
+                e.read(pdf)
+
+    def test_empty_txt_does_not_fall_back_to_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'BUR_fvg'
+            source.mkdir()
+            (source / 'bulletin.txt').write_text('   ')
+            (source / 'bulletin.pdf').write_bytes(b'not a real PDF')
+            (source / 'unpaired.PDF').write_bytes(b'also ignored')
+            output = root / 'results'
+            completed = subprocess.run([
+                sys.executable, str(Path(e.__file__)), str(source),
+                '--output', str(output), '--candidates-only'], capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            rows = [json.loads(line) for line in (output / 'inventory.jsonl').read_text().splitlines()]
+            self.assertEqual(sum(r['status'] == 'read_error' for r in rows), 1)
+            self.assertEqual(sum(r.get('reason') == 'pdf_ignored_text_only' for r in rows), 2)
+            self.assertEqual((output / 'candidates.jsonl').read_text(), '')
 
     def test_api_and_cache(self):
         result = {'decision': 'include', 'reason': 'Contributi', 'references': [{'kind': 'law', 'role': 'subject', 'citation': 'Legge regionale 1/2000', 'evidence': 'Contributi'}]}
