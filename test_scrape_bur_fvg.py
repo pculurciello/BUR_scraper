@@ -286,7 +286,70 @@ class ArchivePaginationTests(unittest.TestCase):
         legacy = 'https://www.regione.fvg.it/asp/bur/ricerca/archivio2/archivio.asp?anno=1999'
         self.assertEqual(bur.archive_page_url(legacy, 1999), bur.canonical(legacy))
 
+class TitleMismatchTests(unittest.TestCase):
+    expected = 'NUMERO 49 - 9 DICEMBRE 2021'
+    wrong = 'NUMERO 31 - 2 AGOSTO 2023'
+    url = bur.HOME + 'visionaBUR?bnum=2021%2F12%2F09%2F49'
+
+    def page(self, title):
+        return bur.Page('<div class="box-titolo">'+title+'</div>'
+                        '<a href="/newbur/downloadPDF?doc=0&amp;name=test.pdf">Sommario</a>')
+
+    def fetch(self, root, refreshed):
+        client = Mock()
+        client.page.side_effect = [self.page(self.wrong), refreshed]
+        client.get.return_value = b'%PDF-test'
+        reader = Mock()
+        page = Mock()
+        page.extract_text.return_value = 'summary text'
+        reader.pages = [page]
+        with patch.object(bur, 'PdfReader', return_value=reader), \
+             patch.object(bur, 'pdf_document_title', return_value=('BUR n. 49', 'pdf_metadata')):
+            row = bur.fetch_summary(client, 2021, self.url, self.expected, root, 12)
+        self.assertEqual(client.page.call_args_list, [call(self.url), call(self.url, refresh=True)])
+        self.assertTrue((root/row['pdf']).is_file())
+        self.assertTrue((root/row['testo']).is_file())
+        self.assertEqual(row['pdf'], '2021/BUR_49_09_12_ordinario.pdf')
+        self.assertEqual(row['errore'], '')
+        return row
+
+    def test_persistent_mismatch_downloads_and_flags_for_review(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertLogs(bur.LOG, 'WARNING'):
+            row = self.fetch(Path(tmp), self.page(self.wrong))
+        self.assertEqual(row['stato'], 'da_verificare')
+        self.assertTrue(row['titolo_discordante'])
+        self.assertEqual(row['titolo_dettaglio'], self.wrong)
+        self.assertIn('Download proseguito', row['avviso'])
+
+    def test_fresh_page_resolves_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            row = self.fetch(Path(tmp), self.page(self.expected))
+        self.assertEqual(row['stato'], 'ok')
+        self.assertFalse(row['titolo_discordante'])
+        self.assertEqual(row['titolo_dettaglio'], self.expected)
+
+    def test_failed_refresh_uses_original_page(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertLogs(bur.LOG, 'WARNING'):
+            row = self.fetch(Path(tmp), TimeoutError('slow refresh'))
+        self.assertEqual(row['stato'], 'da_verificare')
+        self.assertIn('Rilettura fresca', row['avviso'])
+
+    def test_refresh_bypasses_cache_and_sends_headers(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(bur.time, 'sleep'):
+            client = bur.Client(Path(tmp), 0, 30, 0)
+            client.opener = Mock()
+            client.opener.open.side_effect = [Response(b'<html>old</html>'), Response(b'<html>new</html>')]
+            self.assertEqual(client.get(self.url), b'<html>old</html>')
+            self.assertEqual(client.get(self.url), b'<html>old</html>')
+            self.assertEqual(client.get(self.url, refresh=True), b'<html>new</html>')
+            self.assertEqual(client.opener.open.call_count, 2)
+            request = client.opener.open.call_args.args[0]
+            self.assertEqual(request.get_header('Cache-control'), 'no-cache')
+            self.assertEqual(request.get_header('Pragma'), 'no-cache')
+            self.assertEqual(client.get(self.url), b'<html>new</html>')
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
