@@ -323,3 +323,21 @@ python scrape_bur_fvg.py --dal 2021 --al 2021 --output bur_fvg
 
 Come per gli altri rerun, gli indici della directory vengono riscritti per
 l'intervallo richiesto; i PDF e TXT delle altre annualita non vengono cancellati.
+
+
+## Estrazione degli atti relativi a contributi con vLLM
+
+`extract_bur_grants.py` seleziona le voci candidate con regex e conferma tramite
+un modello servito da vLLM i riferimenti a leggi, decreti presidenziali e di
+direttori, e deliberazioni relative a contributi. Conserva prove testuali,
+fonti, decisioni incerte e errori per revisione.
+
+```bash
+python -m pip install -r requirements-extraction.txt
+python extract_bur_grants.py bur_fvg --output results --candidates-only
+# Con un server vLLM già avviato su localhost:8000:
+python extract_bur_grants.py bur_fvg --output results
+```
+
+Per installazione del server, scelta del modello, opzioni, schema JSONL,
+cache e limiti di copertura, vedere la [guida all'estrazione](docs/GRANT_EXTRACTION.md).
