@@ -269,8 +269,18 @@ class Client:
         return Page(html)
 
 
-def discover(client, year, seed, errors):
+def discover(client, year, seed, errors, page_number=None):
     seed = archive_page_url(seed, year)
+    if page_number is not None:
+        if page_number < 1:
+            raise ValueError('Il numero di pagina deve essere almeno 1')
+        path = urlsplit(seed).path.rstrip('/').lower()
+        if path.endswith('/archiviobollettini'):
+            seed = canonical(seed, num_pag=page_number)
+        elif path.endswith('/archivio.asp'):
+            seed = canonical(seed, pag=page_number)
+        else:
+            raise ValueError('Archivio non riconosciuto per la selezione manuale della pagina')
     todo, visited, signatures, found = deque([seed]), set(), {}, {}
     while todo:
         url = todo.popleft()
@@ -290,9 +300,10 @@ def discover(client, year, seed, errors):
             else:
                 signatures[signature] = url
             found.update(links)
-            for nxt in pagination(page, url, year):
-                if nxt not in visited:
-                    todo.append(nxt)
+            if page_number is None:
+                for nxt in pagination(page, url, year):
+                    if nxt not in visited:
+                        todo.append(nxt)
             if len(visited) > 1000:
                 raise RuntimeError('Superato limite di 1000 pagine per anno')
         except Exception as exc:
@@ -486,6 +497,8 @@ def write_csv(path, rows, fields):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--year', type=int, help='Seleziona una sola annualita (imposta --dal e --al)')
+    ap.add_argument('--page', type=int, help='Elabora solo questa pagina dei risultati per un singolo anno')
     ap.add_argument('--dal', type=int, default=1999)
     ap.add_argument('--al', type=int, default=2026)
     ap.add_argument('--output', type=Path, default=Path('bur_fvg'))
@@ -510,6 +523,10 @@ def main():
     ap.add_argument('--limit', type=int, default=0, help='Elabora solo N fascicoli per anno (prova)')
     ap.add_argument('--solo-indice', action='store_true', help='Scopre i fascicoli senza scaricare PDF')
     args = ap.parse_args()
+    if args.year is not None:
+        args.dal = args.al = args.year
+    if args.page is not None and (args.page < 1 or args.dal != args.al):
+        ap.error('--page richiede un numero >= 1 e un solo anno: --year ANNO oppure --dal ANNO --al ANNO')
     if not 1999 <= args.dal <= args.al <= 2026:
         ap.error('Intervallo consentito: 1999–2026')
     numeric = (args.delay, args.timeout, args.retry_backoff, args.retry_max_wait)
@@ -539,12 +556,14 @@ def main():
               'titolo_dettaglio', 'titolo_discordante', 'avviso']
     for year in range(args.dal, args.al + 1):
         LOG.info('Anno %s', year)
+        if args.page is not None:
+            LOG.info('Pagina selezionata: %s (senza seguire le altre pagine)', args.page)
         if year not in seeds:
             errors.append(dict(fase='anno', anno=year, url=HOME, errore='Anno assente nel menu'))
             coverage.append(dict(anno=year, pagine_archivio=0, fascicoli=0, elaborati=0, anomalie=1))
             continue
         nerr = len(errors)
-        issues, pages = discover(client, year, seeds[year], errors)
+        issues, pages = discover(client, year, seeds[year], errors, page_number=args.page)
         items = sorted(issues.items())
         if args.limit:
             items = items[:args.limit]
@@ -570,6 +589,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
