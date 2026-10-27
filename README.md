@@ -342,3 +342,33 @@ python extract_bur_grants.py bur_fvg --output results
 
 Per installazione del server, scelta del modello, opzioni, schema JSONL,
 cache e limiti di copertura, vedere la [guida all'estrazione](docs/GRANT_EXTRACTION.md).
+
+
+
+## Scaricare manualmente una pagina di un anno
+
+Per elaborare soltanto la pagina 3 dei risultati dell'archivio 2021:
+
+```bash
+python scrape_bur_fvg.py --year 2021 --page 3 --output bur_2021_pagina3
+```
+
+Sono scaricati i sommari di tutti i fascicoli elencati nella pagina selezionata,
+senza seguire la paginazione verso le altre pagine. `--page` indica la pagina
+dei risultati dell'archivio, non il numero di BUR ne una pagina interna al PDF.
+Per il portale moderno l'URL usa `anno=2021&num_pag=3`; per l'archivio ASP
+storico viene usato `anno=1999&pag=3`.
+
+`--year` imposta un solo anno; in alternativa si puo usare
+`--dal 2021 --al 2021 --page 3`. `--page` rifiuta valori inferiori a 1 e
+intervalli di piu anni. Omettendo `--page` resta attiva la raccolta completa.
+Le altre opzioni funzionano normalmente, inclusi `--refresh`, `--insecure`,
+`--limit` e `--solo-indice`. Per ignorare eventuali risposte in cache:
+
+```bash
+python scrape_bur_fvg.py --year 2021 --page 3 --refresh --output bur_2021_pagina3
+```
+
+Usare una directory separata se si vogliono conservare gli indici di una
+raccolta precedente: CSV e JSON vengono riscritti con i risultati di questa
+esecuzione. I PDF/TXT gia presenti non vengono cancellati.
