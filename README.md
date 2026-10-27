@@ -275,3 +275,15 @@ registrata sono preservati e il relativo nome viene saltato.
 
 Documenti con TYPE diversi hanno già nomi distinti e non richiedono suffissi.
 Non cancellare `file_sources.json` se vuoi mantenere le assegnazioni dei nomi.
+
+
+
+## Pagina iniziale dell'archivio moderno
+
+La raccolta annuale parte direttamente da
+`archivioBollettini?anno=2021&num_pag=1` (con l'anno richiesto), senza visitare
+prima l'alias `archivioBollettini?anno=2021`. I link alla prima pagina vengono
+normalizzati allo stesso URL: la pagina non viene scaricata due volte e non
+produce la falsa anomalia “Elenco identico” tra alias implicito e pagina 1.
+Il controllo degli elenchi identici tra pagine distinte rimane attivo.
+L'archivio ASP storico mantiene il proprio schema di paginazione.
