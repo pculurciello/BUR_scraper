@@ -372,3 +372,28 @@ python scrape_bur_fvg.py --year 2021 --page 3 --refresh --output bur_2021_pagina
 Usare una directory separata se si vogliono conservare gli indici di una
 raccolta precedente: CSV e JSON vengono riscritti con i risultati di questa
 esecuzione. I PDF/TXT gia presenti non vengono cancellati.
+
+
+
+## Risposta di archivio senza fascicoli
+
+Una risposta HTTP 200 puo contenere una pagina temporanea o incompleta senza
+link ai fascicoli. Per gli archivi, lo script valida anche la presenza dei
+link `visionaBUR` o `archivioDettaglio.asp` prima di accettare e salvare la
+risposta in cache. L'assenza dei link attiva gli stessi ritentativi silenziosi
+configurati con `--retries`, senza dichiarare subito fallita la pagina.
+
+Le vecchie risposte in cache prive di fascicoli vengono scartate e richieste
+nuovamente. I ritentativi inviano header no-cache. Se anche l'ultimo tentativo
+non contiene fascicoli, la risposta HTML viene conservata in `diagnostics/`
+e il percorso viene incluso nell'errore finale, per distinguere una pagina
+realmente vuota da problemi del server o da una struttura cambiata.
+
+Per riprovare soltanto la pagina segnalata:
+
+```bash
+python scrape_bur_fvg.py --year 2022 --page 5 --refresh --output bur_2022_page5
+```
+
+La validazione riguarda solo le pagine dei risultati dell'archivio: la home
+e le pagine di dettaglio non richiedono lo stesso tipo di link.
