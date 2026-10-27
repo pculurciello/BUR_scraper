@@ -5,7 +5,7 @@
 Richiede Python 3.10 o successivo.
 
 ```bash
-python -m pip install pypdf
+python -m pip install pypdf fonttools
 python scrape_bur_fvg.py --dal 1999 --al 2026 --output bur_fvg
 ```
 
