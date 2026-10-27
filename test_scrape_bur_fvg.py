@@ -261,10 +261,10 @@ class ArchivePaginationTests(unittest.TestCase):
                 '<a href="?anno=2021&amp;num_pag=1">1</a>'),
         }
         client = Mock()
-        client.page.side_effect = pages.__getitem__
+        client.page.side_effect = lambda url, **kwargs: pages[url]
         errors = []
         found, visited = bur.discover(client, 2021, seed, errors)
-        self.assertEqual(client.page.call_args_list, [call(first), call(second)])
+        self.assertEqual(client.page.call_args_list, [call(first, require_issues=True), call(second, require_issues=True)])
         self.assertEqual(len(found), 2)
         self.assertEqual(visited, 2)
         self.assertEqual(errors, [])
@@ -358,7 +358,7 @@ class ManualArchivePageTests(unittest.TestCase):
         seed = bur.HOME+'archivioBollettini?anno=2021'
         errors = []
         found, count = bur.discover(client, 2021, seed, errors, page_number=3)
-        client.page.assert_called_once_with(bur.canonical(seed, num_pag=3))
+        client.page.assert_called_once_with(bur.canonical(seed, num_pag=3), require_issues=True)
         self.assertEqual(count, 1)
         self.assertEqual(len(found), 1)
         self.assertEqual(errors, [])
@@ -371,7 +371,7 @@ class ManualArchivePageTests(unittest.TestCase):
         seed = 'https://www.regione.fvg.it/asp/bur/ricerca/archivio2/archivio.asp?anno=1999'
         errors = []
         found, _ = bur.discover(client, 1999, seed, errors, page_number=3)
-        client.page.assert_called_once_with(bur.canonical(seed, pag=3))
+        client.page.assert_called_once_with(bur.canonical(seed, pag=3), require_issues=True)
         self.assertEqual(len(found), 1)
         self.assertEqual(errors, [])
 
@@ -401,7 +401,64 @@ class ManualArchivePageTests(unittest.TestCase):
             self.assertEqual(discover.call_args.kwargs['page_number'], 3)
             self.assertTrue((Path(tmp)/'fascicoli.csv').is_file())
 
+class EmptyArchiveResponseTests(unittest.TestCase):
+    url = bur.HOME + 'archivioBollettini?anno=2022&num_pag=5'
+    empty = b'<html><body>Servizio temporaneamente non disponibile</body></html>'
+    valid = b'<html><a href="./visionaBUR?bnum=2022/07/06/27">NUMERO 27</a></html>'
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        sleep = patch.object(bur.time, 'sleep')
+        sleep.start()
+        self.addCleanup(sleep.stop)
+        self.client = bur.Client(self.root, 0, 30, 2)
+        self.client.opener = Mock()
+
+    def test_empty_then_valid_is_retried_silently(self):
+        self.client.opener.open.side_effect = [Response(self.empty), Response(self.valid)]
+        with self.assertNoLogs(bur.LOG, logging.DEBUG):
+            page = self.client.page(self.url, require_issues=True)
+        self.assertEqual(len(bur.issue_links(page, self.url)), 1)
+        self.assertEqual(self.client.opener.open.call_count, 2)
+        self.assertEqual(self.client.opener.open.call_args.args[0].get_header('Cache-control'), 'no-cache')
+        self.assertEqual(next((self.root/'cache').glob('*.html')).read_bytes(), self.valid)
+
+    def test_old_empty_cache_is_discarded(self):
+        key = bur.hashlib.sha256(bur.canonical(self.url).encode()).hexdigest()
+        cached = self.root/'cache'/(key+'.html')
+        cached.write_bytes(self.empty)
+        self.client.opener.open.return_value = Response(self.valid)
+        page = self.client.page(self.url, require_issues=True)
+        self.assertEqual(len(bur.issue_links(page, self.url)), 1)
+        self.client.opener.open.assert_called_once()
+        self.assertEqual(cached.read_bytes(), self.valid)
+        self.assertEqual(self.client.opener.open.call_args.args[0].get_header('Cache-control'), 'no-cache')
+
+    def test_exhausted_empty_responses_preserve_diagnostic_not_cache(self):
+        self.client.opener.open.return_value = Response(self.empty)
+        with self.assertRaisesRegex(bur.InvalidResponseError, 'Risposta HTML:'):
+            self.client.page(self.url, require_issues=True)
+        self.assertEqual(self.client.opener.open.call_count, 3)
+        self.assertEqual(list((self.root/'cache').glob('*.html')), [])
+        diagnostic = list((self.root/'diagnostics').glob('*.html'))
+        self.assertEqual(len(diagnostic), 1)
+        self.assertEqual(diagnostic[0].read_bytes(), self.empty)
+
+    def test_valid_cache_is_reused(self):
+        self.client.opener.open.return_value = Response(self.valid)
+        self.client.page(self.url, require_issues=True)
+        self.client.page(self.url, require_issues=True)
+        self.client.opener.open.assert_called_once()
+
+    def test_non_archive_html_does_not_require_issue_links(self):
+        self.client.opener.open.return_value = Response(self.empty)
+        self.client.page(bur.HOME)
+        self.client.opener.open.assert_called_once()
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
