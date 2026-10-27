@@ -248,7 +248,46 @@ class MetadataTypeTests(unittest.TestCase):
             self.assertEqual(row['tipo_fascicolo'], 'supplemento')
             self.assertEqual(row['fonte_tipo'], 'pdf_metadata')
 
+class ArchivePaginationTests(unittest.TestCase):
+    def test_discovery_starts_on_explicit_page_one(self):
+        seed = bur.HOME + 'archivioBollettini?anno=2021'
+        first = bur.canonical(seed, num_pag=1)
+        second = bur.canonical(seed, num_pag=2)
+        pages = {
+            first: bur.Page('<a href="./visionaBUR?bnum=2021/01/07/1">NUMERO 1</a>'
+                '<a href="?anno=2021&amp;num_pag=1">1</a>'
+                '<a href="?anno=2021&amp;num_pag=2">2</a>'),
+            second: bur.Page('<a href="./visionaBUR?bnum=2021/01/14/2">NUMERO 2</a>'
+                '<a href="?anno=2021&amp;num_pag=1">1</a>'),
+        }
+        client = Mock()
+        client.page.side_effect = pages.__getitem__
+        errors = []
+        found, visited = bur.discover(client, 2021, seed, errors)
+        self.assertEqual(client.page.call_args_list, [call(first), call(second)])
+        self.assertEqual(len(found), 2)
+        self.assertEqual(visited, 2)
+        self.assertEqual(errors, [])
+
+    def test_real_duplicate_pages_still_reported(self):
+        seed = bur.HOME+'archivioBollettini?anno=2021'
+        page = bur.Page('<a href="./visionaBUR?bnum=2021/01/07/1">NUMERO 1</a>'
+                        '<a href="?anno=2021&amp;num_pag=2">2</a>')
+        client = Mock()
+        client.page.return_value = page
+        errors = []
+        bur.discover(client, 2021, seed, errors)
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]['fase'], 'paginazione')
+
+    def test_preserves_numbered_pages_and_legacy_urls(self):
+        numbered = bur.HOME+'archivioBollettini?anno=2021&num_pag=3'
+        self.assertEqual(bur.archive_page_url(numbered, 2021), bur.canonical(numbered))
+        legacy = 'https://www.regione.fvg.it/asp/bur/ricerca/archivio2/archivio.asp?anno=1999'
+        self.assertEqual(bur.archive_page_url(legacy, 1999), bur.canonical(legacy))
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
