@@ -194,11 +194,11 @@ class Client:
         self.retry_backoff, self.retry_max_wait = retry_backoff, retry_max_wait
         self.last = 0.0
 
-    def get(self, url, pdf=False):
+    def get(self, url, pdf=False, refresh=False):
         url = canonical(url)
         key = hashlib.sha256(url.encode()).hexdigest()
         path = self.cache / (key + ('.pdf' if pdf else '.html'))
-        if path.exists() and not self.refresh:
+        if path.exists() and not (self.refresh or refresh):
             return path.read_bytes()
         for attempt in range(self.retries + 1):
             try:
@@ -208,6 +208,9 @@ class Client:
                     'User-Agent': 'BUR-FVG-research-scraper/1.0',
                     'Accept': 'application/pdf' if pdf else 'text/html',
                 })
+                if self.refresh or refresh:
+                    req.add_header('Cache-Control', 'no-cache')
+                    req.add_header('Pragma', 'no-cache')
                 with self.opener.open(req, timeout=self.timeout) as response:
                     if urlsplit(response.url).hostname not in HOSTS:
                         raise ValueError('Redirect fuori dai domini regionali')
@@ -257,8 +260,8 @@ class Client:
             return data
         raise RuntimeError('Download fallito')
 
-    def page(self, url):
-        data = self.get(url)
+    def page(self, url, refresh=False):
+        data = self.get(url, refresh=refresh)
         try:
             html = data.decode('utf-8-sig')
         except UnicodeDecodeError:
@@ -405,12 +408,27 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
     row = dict(anno=year, id=uid, titolo=title, url_fascicolo=url,
                url_documento='', tipo_documento='', stato='', pdf='', testo='',
                pagine_pdf=0, pagine_estratte=0, errore='',
-               titolo_pdf='', tipo_fascicolo='', fonte_tipo='')
+               titolo_pdf='', tipo_fascicolo='', fonte_tipo='',
+               titolo_dettaglio='', titolo_discordante=False, avviso='')
     try:
         page = client.page(url)
-        if page.titles and clean(page.titles[0]).casefold() != clean(title).casefold():
-            raise ValueError('Titolo del dettaglio diverso da quello in archivio: '
-                             + page.titles[0])
+        def mismatched(candidate):
+            return bool(candidate.titles and
+                        clean(candidate.titles[0]).casefold() != clean(title).casefold())
+        if mismatched(page):
+            # Una risposta incoerente puo essere rimasta in cache: prova una
+            # sola rilettura fresca, senza bloccare il download se non risolve.
+            try:
+                page = client.page(url, refresh=True)
+            except Exception as exc:
+                row['avviso'] = 'Rilettura fresca del dettaglio fallita: ' + str(exc)
+        row['titolo_dettaglio'] = page.titles[0] if page.titles else ''
+        row['titolo_discordante'] = mismatched(page)
+        if row['titolo_discordante']:
+            row['avviso'] = clean(row['avviso'] +
+                ' Titolo del dettaglio diverso da quello in archivio: ' +
+                row['titolo_dettaglio'] + '. Download proseguito; verificare il documento.')
+            LOG.warning('%s: %s', url, row['avviso'])
         summaries, full = [], []
         for href, label in page.links:
             if not href or href.startswith(('#', 'javascript:')):
@@ -449,6 +467,8 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         row['pagine_estratte'] = limit
         has_text = any((reader.pages[i].extract_text() or '').strip() for i in range(limit))
         row['stato'] = ('ok' if summaries else 'da_verificare') if has_text else 'ocr_necessario'
+        if row['titolo_discordante'] and row['stato'] == 'ok':
+            row['stato'] = 'da_verificare'
     except Exception as exc:
         row['stato'], row['errore'] = 'errore', str(exc)
         LOG.warning('%s: %s', url, exc)
@@ -515,7 +535,8 @@ def main():
              for value, label in home.options if label.isdigit() and value}
     fields = ['anno', 'id', 'titolo', 'url_fascicolo', 'url_documento', 'tipo_documento',
               'stato', 'pdf', 'testo', 'pagine_pdf', 'pagine_estratte', 'errore',
-              'titolo_pdf', 'tipo_fascicolo', 'fonte_tipo']
+              'titolo_pdf', 'tipo_fascicolo', 'fonte_tipo',
+              'titolo_dettaglio', 'titolo_discordante', 'avviso']
     for year in range(args.dal, args.al + 1):
         LOG.info('Anno %s', year)
         if year not in seeds:
@@ -549,6 +570,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
