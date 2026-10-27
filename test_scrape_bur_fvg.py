@@ -348,7 +348,61 @@ class TitleMismatchTests(unittest.TestCase):
             self.assertEqual(request.get_header('Pragma'), 'no-cache')
             self.assertEqual(client.get(self.url), b'<html>new</html>')
 
+class ManualArchivePageTests(unittest.TestCase):
+    def test_modern_selected_page_does_not_follow_links(self):
+        client = Mock()
+        client.page.return_value = bur.Page(
+            '<a href="./visionaBUR?bnum=2021/01/14/2">NUMERO 2</a>'
+            '<a href="?anno=2021&amp;num_pag=1">1</a>'
+            '<a href="?anno=2021&amp;num_pag=4">4</a>')
+        seed = bur.HOME+'archivioBollettini?anno=2021'
+        errors = []
+        found, count = bur.discover(client, 2021, seed, errors, page_number=3)
+        client.page.assert_called_once_with(bur.canonical(seed, num_pag=3))
+        self.assertEqual(count, 1)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(errors, [])
+
+    def test_legacy_uses_pag_parameter(self):
+        client = Mock()
+        client.page.return_value = bur.Page(
+            '<a href="archivioDettaglio.asp?num=5&amp;nodo=73">SUPPLEMENTO</a>'
+            '<a href="?pag=4">4</a>')
+        seed = 'https://www.regione.fvg.it/asp/bur/ricerca/archivio2/archivio.asp?anno=1999'
+        errors = []
+        found, _ = bur.discover(client, 1999, seed, errors, page_number=3)
+        client.page.assert_called_once_with(bur.canonical(seed, pag=3))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(errors, [])
+
+    def test_invalid_manual_page_arguments_fail_before_network(self):
+        for options in [['--year', '2021', '--page', '0'], ['--page', '3']]:
+            with self.subTest(options=options), patch('sys.argv', ['scraper']+options), \
+                 patch.object(bur, 'Client') as client, patch('sys.stderr', new_callable=io.StringIO):
+                with self.assertRaises(SystemExit) as exc:
+                    bur.main()
+                self.assertEqual(exc.exception.code, 2)
+                client.assert_not_called()
+
+    def test_cli_passes_year_and_page_to_discovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ['scraper', '--year', '2021', '--page', '3', '--output', tmp, '--solo-indice']
+            client = Mock()
+            client.page.return_value = bur.Page(
+                '<select><option value="/newbur/archivioBollettini?anno=2021">2021</option></select>')
+            url = bur.HOME+'visionaBUR?bnum=2021/01/14/2'
+            with patch('sys.argv', argv), patch.object(bur, 'Client', return_value=client), \
+                 patch.object(bur, 'discover', return_value=({url: 'NUMERO 2'}, 1)) as discover, \
+                 patch.object(bur.logging, 'basicConfig'), \
+                 patch.object(bur.logging, 'FileHandler', return_value=logging.NullHandler()):
+                self.assertEqual(bur.main(), 0)
+            self.assertEqual(discover.call_count, 1)
+            self.assertEqual(discover.call_args.args[1], 2021)
+            self.assertEqual(discover.call_args.kwargs['page_number'], 3)
+            self.assertTrue((Path(tmp)/'fascicoli.csv').is_file())
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
