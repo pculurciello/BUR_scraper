@@ -194,12 +194,22 @@ class Client:
         self.retry_backoff, self.retry_max_wait = retry_backoff, retry_max_wait
         self.last = 0.0
 
-    def get(self, url, pdf=False, refresh=False):
+    def get(self, url, pdf=False, refresh=False, validator=None):
         url = canonical(url)
         key = hashlib.sha256(url.encode()).hexdigest()
         path = self.cache / (key + ('.pdf' if pdf else '.html'))
         if path.exists() and not (self.refresh or refresh):
-            return path.read_bytes()
+            cached = path.read_bytes()
+            try:
+                if validator is not None:
+                    validator(cached)
+            except InvalidResponseError:
+                # Una pagina HTML formalmente valida puo essere una risposta
+                # temporanea senza risultati, salvata da versioni precedenti.
+                path.unlink()
+                refresh = True
+            else:
+                return cached
         for attempt in range(self.retries + 1):
             try:
                 time.sleep(max(0, self.delay - (time.monotonic() - self.last)))
@@ -208,7 +218,7 @@ class Client:
                     'User-Agent': 'BUR-FVG-research-scraper/1.0',
                     'Accept': 'application/pdf' if pdf else 'text/html',
                 })
-                if self.refresh or refresh:
+                if self.refresh or refresh or attempt > 0:
                     req.add_header('Cache-Control', 'no-cache')
                     req.add_header('Pragma', 'no-cache')
                 with self.opener.open(req, timeout=self.timeout) as response:
@@ -222,6 +232,8 @@ class Client:
                     raise InvalidResponseError('Il server ha restituito HTML o un file non PDF')
                 if not pdf and b'<html' not in data.lower():
                     raise InvalidResponseError('Risposta non HTML')
+                if validator is not None:
+                    validator(data)
             except Exception as exc:
                 reason = exc.reason if isinstance(exc, URLError) else exc
                 if isinstance(reason, ssl.SSLCertVerificationError):
@@ -243,6 +255,15 @@ class Client:
                 if isinstance(exc, HTTPError):
                     exc.close()
                 if not retryable or attempt == self.retries:
+                    if isinstance(exc, InvalidResponseError) and not pdf:
+                        diagnostic = self.cache.parent / 'diagnostics' / f'{key}.html'
+                        try:
+                            diagnostic.parent.mkdir(parents=True, exist_ok=True)
+                            diagnostic.write_bytes(data)
+                        except OSError:
+                            pass
+                        else:
+                            raise InvalidResponseError(f'{exc}. Risposta HTML: {diagnostic}') from exc
                     raise
                 if requested_wait is None:
                     pause = min(self.retry_max_wait,
@@ -260,13 +281,23 @@ class Client:
             return data
         raise RuntimeError('Download fallito')
 
-    def page(self, url, refresh=False):
-        data = self.get(url, refresh=refresh)
-        try:
-            html = data.decode('utf-8-sig')
-        except UnicodeDecodeError:
-            html = data.decode('cp1252', errors='replace')
-        return Page(html)
+    def page(self, url, refresh=False, require_issues=False):
+        def parse(data):
+            try:
+                html = data.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                html = data.decode('cp1252', errors='replace')
+            return Page(html)
+
+        def validate_archive(data):
+            if not issue_links(parse(data), url):
+                raise InvalidResponseError(
+                    'Nessun fascicolo nella risposta HTML: pagina vuota, temporanea '
+                    'o struttura non riconosciuta')
+
+        data = self.get(url, refresh=refresh,
+                        validator=validate_archive if require_issues else None)
+        return parse(data)
 
 
 def discover(client, year, seed, errors, page_number=None):
@@ -288,7 +319,7 @@ def discover(client, year, seed, errors, page_number=None):
             continue
         visited.add(url)
         try:
-            page = client.page(url)
+            page = client.page(url, require_issues=True)
             links = issue_links(page, url)
             if not links:
                 raise ValueError('Nessun fascicolo: verificare archivio o selettori')
@@ -589,6 +620,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
