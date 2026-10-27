@@ -117,6 +117,15 @@ def issue_links(page, base):
     return found
 
 
+def archive_page_url(url, year):
+    """La pagina iniziale moderna usa sempre num_pag=1, senza alias implicito."""
+    query = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
+    overrides = {'anno': year}
+    if urlsplit(url).path.rstrip('/').lower().endswith('/archiviobollettini'):
+        overrides['num_pag'] = query.get('num_pag') or '1'
+    return canonical(url, **overrides)
+
+
 def pagination(page, base, year):
     out = set()
     for href, _ in page.links:
@@ -126,7 +135,7 @@ def pagination(page, base, year):
             continue
         q = dict(parse_qsl(p.query))
         if any(k in q for k in ('pag', 'num_pag', 'trimestre')):
-            out.add(canonical(u, anno=year))
+            out.add(archive_page_url(u, year))
     return sorted(out)
 
 
@@ -258,7 +267,7 @@ class Client:
 
 
 def discover(client, year, seed, errors):
-    seed = canonical(seed, anno=year)
+    seed = archive_page_url(seed, year)
     todo, visited, signatures, found = deque([seed]), set(), {}, {}
     while todo:
         url = todo.popleft()
@@ -540,6 +549,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
