@@ -83,12 +83,44 @@ REGIONAL_HEADER = re.compile(
     re.I | re.M)
 
 
+# Reflowed TXT has no physical line boundaries. Explicit summary headings
+# (or all-caps legacy headings after a BUR preamble) remain recognizable.
+FLAT_PART_HEADER = re.compile(
+    r'(?:(?P<summary>(?i:Sommario)\s+)(?i:PARTE)|PARTE)\s+'
+    r'(?P<part>(?i:PRIMA|SECONDA|TERZA|QUARTA))\b')
+FLAT_REGIONAL_HEADER = re.compile(REGIONAL_HEADER.pattern.removeprefix(r'^[ \t]*'), re.I)
+FLAT_ENTRY_END = re.compile(
+    r'(?<!\w)pag(?:ina)?\.?[ \t]*\d+(?:[ \t]*[-–,][ \t]*\d+)*(?=[ \t]|$)', re.I)
+
+
+def flat_regional_section(text):
+    first = FLAT_PART_HEADER.search(text)
+    if not first or first['part'].upper() != 'PRIMA':
+        return None
+    # Avoid treating an incidental citation inside prose as a section header.
+    prefix = text[:first.start()].strip()
+    if prefix and not first['summary'] and not re.search(r'\bbollettino\b', prefix, re.I):
+        return None
+    title = FLAT_REGIONAL_HEADER.match(text, first.start())
+    if not title:
+        return None
+    end = len(text)
+    for following in FLAT_PART_HEADER.finditer(text, title.end()):
+        if following['part'].upper() == 'PRIMA' and following['summary']:
+            continue
+        end = following.start()
+        break
+    return title.end(), end
+
+
 def regional_section(text):
     """Return one summary's Part One body offsets, or None (fail closed).
 
     Later Part One headings in legacy fallback PDFs belong to the full acts,
     not a reason to resume after the summary's Parts Two/Three.
     """
+    if '\n' not in text and '\r' not in text:
+        return flat_regional_section(text)
     first = PART_HEADER.search(text)
     if not first or first['part'].upper() != 'PRIMA':
         return None
@@ -170,7 +202,11 @@ def candidates(text, size=10000, overlap=1500, mode='strict', rejected=None):
     if mode not in ('strict', 'broad'):
         raise ValueError('Unknown filter mode')
     boundaries = {0, len(text), *(m.start() for m in HEAD.finditer(text))}
-    if mode == 'strict':
+    if '\n' not in text and '\r' not in text:
+        # Page locators separate summary entries even when layout line breaks
+        # have been removed. Keep offsets in the original continuous TXT.
+        boundaries.update(m.end() for m in FLAT_ENTRY_END.finditer(text))
+    elif mode == 'strict':
         boundaries.update(m.end() for m in ENTRY_END.finditer(text))
     boundaries = sorted(boundaries)
     for start, end in zip(boundaries, boundaries[1:]):
@@ -350,3 +386,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
