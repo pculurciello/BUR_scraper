@@ -517,7 +517,109 @@ class PdfTextReflowTests(unittest.TestCase):
             for page in reader.pages:
                 page.extract_text.assert_called_once_with()
 
+class ConversionOnlyTests(unittest.TestCase):
+    def reader(self, texts):
+        reader = Mock()
+        reader.pages = []
+        for text in texts:
+            page = Mock()
+            page.extract_text.return_value = text
+            reader.pages.append(page)
+        return reader
+
+    def test_cli_conversion_never_constructs_network_client(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root/'2021'
+            folder.mkdir()
+            pdf = folder/'BUR_49_09_12_ordinario.pdf'
+            pdf.write_bytes(b'pdf fixture')
+            txt = pdf.with_suffix('.txt')
+            txt.write_text('old text')
+            index = root/'fascicoli.json'
+            index.write_text('original index')
+            registry = root/'file_sources.json'
+            registry.write_text('original registry')
+            argv = ['scraper', '--convert-only', '--output', str(root)]
+            reader = self.reader(['La Regione concede contri-', 'buti alle\nimprese.'])
+            with patch('sys.argv', argv), patch.object(bur, 'Client') as network, \
+                 patch.object(bur, 'PdfReader', return_value=reader), \
+                 patch.object(bur.logging, 'basicConfig'), \
+                 patch.object(bur.logging, 'FileHandler', return_value=logging.NullHandler()):
+                self.assertEqual(bur.main(), 0)
+            network.assert_not_called()
+            self.assertEqual(txt.read_text(), 'La Regione concede contributi alle imprese.')
+            self.assertEqual(index.read_text(), 'original index')
+            self.assertEqual(registry.read_text(), 'original registry')
+            with (root/'conversione.csv').open(encoding='utf-8-sig', newline='') as f:
+                row = next(bur.csv.DictReader(f))
+            self.assertEqual(row['stato'], 'ok')
+            self.assertEqual(row['pagine_estratte'], '2')
+
+    def test_year_filter_uppercase_extension_and_cache_exclusion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ['2021/a.PDF', '2022/b.pdf', 'cache/2021/c.pdf', 'diagnostics/2021/d.pdf']:
+                path = root/name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'pdf fixture')
+            with patch.object(bur, 'PdfReader', return_value=self.reader(['some text'])) as read:
+                self.assertEqual(bur.convert_existing_pdfs(root, year=2021), 0)
+            read.assert_called_once_with(root/'2021/a.PDF')
+            self.assertTrue((root/'2021/a.txt').is_file())
+            self.assertFalse((root/'cache/2021/c.txt').exists())
+            self.assertFalse((root/'2022/b.txt').exists())
+
+    def test_corrupt_pdf_preserves_txt_and_continues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'a.pdf').write_bytes(b'bad pdf')
+            (root/'a.txt').write_text('keep this text')
+            (root/'b.pdf').write_bytes(b'good pdf')
+            with patch.object(bur, 'PdfReader', side_effect=[ValueError('bad PDF'), self.reader(['new text'])]), \
+                 self.assertLogs(bur.LOG, 'WARNING'):
+                self.assertEqual(bur.convert_existing_pdfs(root), 2)
+            self.assertEqual((root/'a.txt').read_text(), 'keep this text')
+            self.assertEqual((root/'b.txt').read_text(), 'new text')
+
+    def test_no_text_preserves_existing_txt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'a.pdf').write_bytes(b'image PDF')
+            (root/'a.txt').write_text('existing OCR result')
+            with patch.object(bur, 'PdfReader', return_value=self.reader(['', '   '])), \
+                 self.assertLogs(bur.LOG, 'WARNING'):
+                self.assertEqual(bur.convert_existing_pdfs(root), 2)
+            self.assertEqual((root/'a.txt').read_text(), 'existing OCR result')
+
+    def test_empty_selection_reports_failure(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertLogs(bur.LOG, 'WARNING'):
+            root = Path(tmp)
+            self.assertEqual(bur.convert_existing_pdfs(root), 2)
+            self.assertTrue((root/'conversione.csv').is_file())
+
+    def test_limit_applies_to_sorted_local_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ['b.pdf', 'a.pdf']:
+                (root/name).write_bytes(b'pdf fixture')
+            with patch.object(bur, 'PdfReader', return_value=self.reader(['text'])) as read:
+                self.assertEqual(bur.convert_existing_pdfs(root, limit=1), 0)
+            read.assert_called_once_with(root/'a.pdf')
+            self.assertFalse((root/'b.txt').exists())
+
+    def test_invalid_conversion_arguments_fail_before_network(self):
+        for options in [['--convert-only', '--page', '2'],
+                        ['--convert-only', '--solo-indice']]:
+            with patch('sys.argv', ['scraper']+options), patch.object(bur, 'Client') as client, \
+                 patch('sys.stderr', new_callable=io.StringIO):
+                with self.assertRaises(SystemExit) as result:
+                    bur.main()
+                self.assertEqual(result.exception.code, 2)
+                client.assert_not_called()
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
