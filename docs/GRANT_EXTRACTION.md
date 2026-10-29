@@ -1,7 +1,8 @@
 # Estrazione degli atti relativi a contributi
 
 `extract_bur_grants.py` analizza ricorsivamente una directory di sommari BUR FVG
-(ad esempio `BUR_fvg` o `bur_fvg`) in due passaggi:
+(ad esempio `BUR_fvg` o `bur_fvg`). Prima isola esclusivamente la sezione
+**PARTE PRIMA — LEGGI, REGOLAMENTI E ATTI DELLA REGIONE**, poi applica due passaggi:
 
 1. **Filtro deterministico:** separa le voci usando intestazioni di atti e
    richiede indizi specifici di una misura contributiva (`--filter-mode strict`,
@@ -9,6 +10,12 @@
    `--filter-mode broad` per confronti e controlli di richiamo.
 2. **Conferma semantica:** invia solo le voci candidate a un server vLLM con API
    OpenAI compatibile; richiede JSON strutturato ed estratti letterali verificabili.
+
+Sono ammesse soltanto misure promosse dall'amministrazione della Regione Autonoma
+Friuli Venezia Giulia. Comuni e altri enti possono essere beneficiari, senza
+essere i promotori. Le misure regionali cofinanziate con fondi europei sono
+ammesse; la semplice citazione di una legge regionale da parte di un diverso
+promotore non basta. Questo vincolo è richiamato anche nel prompt del modello.
 
 La classificazione comprende leggi, decreti del Presidente della Regione,
 decreti di direttori anche centrali/di servizio e deliberazioni. Comprende
@@ -110,6 +117,46 @@ DOCX, CSV e JSON) sono registrati come `unsupported_format`. Le directory `cache
 diversa dall'input. Se un bollettino ha soltanto il PDF, occorre produrne il TXT
 prima di usare questo estrattore; il PDF saltato da solo non genera codice 2.
 
+## Selezione obbligatoria della Parte Prima
+
+La selezione precede qualsiasi filtro contributivo e vale **anche con
+`--filter-mode broad`**. Non è prevista una scansione indiscriminata del documento
+quando manca il titolo richiesto.
+
+Sono riconosciuti entrambi i formati osservati nei campioni:
+
+```text
+PARTE PRIMA
+LEGGI, REGOLAMENTI E ATTI DELLA REGIONE
+```
+
+```text
+Sommario Parte Prima Leggi, regolamenti e atti della
+Regione
+```
+
+Il riconoscimento ignora maiuscole/minuscole e consente titoli su più righe.
+La prima sezione deve avere il titolo regionale completo. La selezione termina
+al successivo titolo di parte: Parte Seconda, Parte Terza, Parte Quarta, oppure
+una nuova Parte Prima senza indicazione di sommario (inizio del testo integrale).
+Le ripetizioni moderne `Sommario Parte Prima` sono ammesse come continuazione.
+Non si riprende a leggere una nuova Parte Prima dopo Parti Seconda/Terza:
+nei ripieghi storici il TXT contiene spesso il sommario e poi il testo degli atti.
+Il prefisso precedente al titolo, comprese eventuali norme postali di copertina,
+non viene analizzato per i contributi.
+
+`source`, `start` e `end` dei candidati e degli scarti mantengono gli offset nel
+TXT completo normalizzato, non nella sottostringa della sezione. I candidati
+hanno `section=parte_prima`. L'inventario registra `section_start`, `section_end`
+e `excluded_characters` per verificare i limiti della selezione.
+
+Se la sezione non è riconoscibile, lo stato è **`section_not_found`**, il file
+produce zero candidati e nessun suo testo è inviato al modello. Il codice di
+uscita è 2, per richiedere un controllo. Questa condizione non significa che il
+documento non contenga contributi: potrebbe essere un supplemento senza sommario,
+un titolo estratto male o un documento incompleto. Non inferire il promotore
+dal solo nome del file o da riferimenti regionali isolati.
+
 ## Filtro più selettivo e confronto con il precedente
 
 Il filtro `strict` riduce le richieste al modello seguendo queste regole:
@@ -146,8 +193,9 @@ Per ricalcolare il numero di richieste senza chiamare vLLM:
 python extract_bur_grants.py BUR_fvg --output results --candidates-only
 ```
 
-Il comando stampa il numero selezionato e quello del filtro precedente sullo
-stesso input. `filter_summary.json` conserva i conteggi e le ragioni di scarto;
+Il comando stampa tre conteggi: candidati selezionati nella Parte Prima,
+candidati del filtro ampio nella stessa sezione e candidati del filtro ampio
+sui documenti interi (solo confronto deterministico, mai inviati al modello). `filter_summary.json` conserva i conteggi e le ragioni di scarto;
 `inventory.jsonl` contiene i conteggi anche per singolo file. Per ispezionare gli
 scarti, leggere `rejected.jsonl`: include fonte, testo, offset e ragione
 (`no_act_reference`, `no_grant_evidence`, `no_grant_evidence_in_window`). Ogni
@@ -155,7 +203,8 @@ candidato include `filter_reason`, con la regola che lo ha ammesso.
 I conteggi degli scarti mescolano voci intere e finestre: non rappresentano una
 misura di accuratezza e non vanno sottratti direttamente dal numero di candidati.
 
-Per ripristinare il filtro originale e confrontare le voci:
+Per ripristinare le parole chiave del filtro originale e confrontare le voci
+**sempre limitatamente alla Parte Prima**:
 
 ```bash
 python extract_bur_grants.py BUR_fvg --output results_broad \
@@ -198,7 +247,7 @@ delle richieste al modello.
 | `--model` | `VLLM_MODEL` oppure `Qwen/Qwen2.5-32B-Instruct` | Nome del modello servito |
 | `--workers` | `4` | Richieste concorrenti, almeno 1 |
 | `--candidates-only` | disattivato | Esegue soltanto lettura e filtro regex |
-| `--filter-mode` | `strict` | `strict` selettivo oppure `broad` per il filtro originale |
+| `--filter-mode` | `strict` | `strict` selettivo oppure `broad` con parole chiave originali, entrambi solo Parte Prima |
 
 Il client usa temperatura 0, massimo 4096 token di risposta, timeout socket di
 180 secondi e fino a tre tentativi con pause di 1 e 2 secondi. Le voci lunghe
@@ -215,7 +264,7 @@ Ogni riga JSONL è un oggetto JSON indipendente, codificato UTF-8.
 | `inventory.jsonl` | Un record per file: lettura, conteggi, errori o motivo del salto |
 | `candidates.jsonl` | Voci selezionate dalle regex con fonte, testo, offset e regola di ammissione |
 | `rejected.jsonl` | Voci/finestre scartate con fonte, testo, offset e motivo |
-| `filter_summary.json` | Confronto dei conteggi selettivi con quelli del filtro originale |
+| `filter_summary.json` | Conteggi selettivi, ampi in sezione, ampi nel documento intero e sezioni mancanti |
 | `decisions.jsonl` | Tutte le decisioni del modello, anche incerte e fallite |
 | `confirmed.jsonl` | Solo voci con decisione `include` e relativi riferimenti |
 | `cache/*.json` | Risposte validate, riutilizzate nei rerun |
@@ -271,7 +320,7 @@ progressivamente; un'interruzione conserva le risposte già in cache.
 
 - **0:** nessun errore di lettura o inferenza; non certifica la completezza,
   non implica la presenza di candidati e può includere decisioni `uncertain`.
-- **2:** errori di lettura/inferenza, oppure argomenti CLI non validi.
+- **2:** errori di lettura/inferenza, sezione regionale non trovata, oppure argomenti CLI non validi.
 
 Prima del censimento completo, annotare manualmente un campione di anni e
 formati e misurare precisione e richiamo, includendo anche voci scartate dalle
@@ -297,3 +346,39 @@ coprono anche avvisi generici, fondi, appalti, assunzioni, contributi obbligator
 strumenti e fasi delle misure contributive, contesto vicino, frasi su più righe
 e finestre prive di indizi pertinenti. La raccolta
 1999–2026 e l'inferenza con vLLM reale non sono state eseguite per questa aggiunta.
+
+## Verifica sui dieci TXT caricati dall'utente
+
+Controllo deterministico effettuato senza inferenza vLLM. I candidati non sono
+ancora conferme semantiche di bandi. Il filtro ampio qui confrontato è quello
+originale sull'intero documento, prima del vincolo di sezione.
+
+| Documento | Ampio, intero TXT | Selettivo, Parte Prima |
+| --- | ---: | ---: |
+| `BUR_legacy_5_18_ordinario.txt` | 18 | 0 |
+| `BUR_legacy_5_19_ordinario.txt` | 6 | 1 |
+| `BUR_legacy_5_20_ordinario.txt` | 4 | 0 |
+| `BUR_legacy_5_73_supplemento_ordinario.txt` | 2 | 0 (titolo assente) |
+| `BUR_legacy_6_21_ordinario.txt` | 5 | 1 |
+| `BUR_1_02_01_ordinario.txt` | 12 | 4 |
+| `BUR_2_09_01_ordinario.txt` | 4 | 2 |
+| `BUR_3_16_01_ordinario.txt` | 4 | 1 |
+| `BUR_1_07_01_supplemento.txt` | 0 | 0 |
+| `BUR_2_07_01_supplemento.txt` | 0 | 0 |
+| **Totale** | **55** | **9** |
+
+Il filtro ampio limitato alla Parte Prima produce 38 candidati. La riduzione
+55 → 9 combina quindi il vincolo di sezione e il filtro selettivo, non è
+attribuibile alla sola selezione della Parte Prima. Nove file hanno un titolo
+riconosciuto. Il supplemento storico `BUR_legacy_5_73_supplemento_ordinario.txt`
+non contiene quel titolo e viene segnalato per revisione. I due supplementi
+moderni contengono il titolo ma nessuna voce selezionata dalle regole contributive.
+
+Le fixture `tests/fixtures/section_layouts.json` conservano soltanto intestazioni
+e impaginazione rappresentative dei dieci file, con voci di prova sintetiche;
+non pubblicano gli interi documenti, gli atti integrali o i dati personali
+presenti in uno dei supplementi. I test controllano esclusione di Parti Seconda
+e Terza, mancato rientro negli atti integrali successivi, continuità dei titoli
+moderni ripetuti, offset originali e blocco delle chiamate API in assenza di titolo.
+Il prompt del modello è cambiato per il vincolo sul promotore: le vecchie risposte
+in cache non vengono riutilizzate con il nuovo prompt.

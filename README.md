@@ -416,3 +416,25 @@ Controllare `filter_summary.json` e un campione di `rejected.jsonl` prima di
 avviare il modello. `--filter-mode broad` ripristina il filtro precedente.
 La selezione più stretta può perdere voci dal titolo generico: dettagli e limiti
 nella [guida all'estrazione](docs/GRANT_EXTRACTION.md#filtro-più-selettivo-e-confronto-con-il-precedente).
+
+
+## Solo atti della Regione: Parte Prima
+
+L'estrattore esamina esclusivamente **PARTE PRIMA — LEGGI, REGOLAMENTI E ATTI
+DELLA REGIONE**, sia nei sommari storici sia nel formato moderno `Sommario Parte
+Prima`. Parti Seconda/Terza e successivi testi integrali sono esclusi. Il vincolo
+vale anche in modalità `broad`. Il modello verifica inoltre che la misura sia
+promossa dalla Regione, distinguendo il promotore dai beneficiari.
+
+Il comando resta:
+
+```bash
+python extract_bur_grants.py BUR_fvg --output results --candidates-only
+```
+
+Controllare `inventory.jsonl`: `section_not_found` significa zero invii al modello
+per quel file e codice di uscita 2, per revisione. Nei dieci TXT di prova, nove
+hanno un titolo regionale riconosciuto; il supplemento storico senza titolo è
+escluso. I filtri combinati selezionano 9 candidati contro i 55 del filtro ampio
+originale sull'intero testo. Risultati e limiti nella
+[guida all'estrazione](docs/GRANT_EXTRACTION.md#selezione-obbligatoria-della-parte-prima).

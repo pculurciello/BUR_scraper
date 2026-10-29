@@ -1,0 +1,62 @@
+[
+  {
+    "name": "BUR_1_02_01_ordinario.txt",
+    "text": "--- Pagina 1 ---\nbollettino ufficiale della regione autonoma friuli venezia giulia \u0018 \u00182 gennaio 2008\nSommario Parte Prima Leggi, regolamenti e atti della \nRegione\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\nSommario Parte Terza Concorsi e avvisi\nLegge regionale 2/2008. Contributi statali.\npag. 30\nPARTE TERZA\nCONCORSI E AVVISI\nDecreto n. 3. Contributi comunali.\npag. 40\nPARTE PRIMA\nLEGGI, REGOLAMENTI\nE ATTI DELLA REGIONE\nDecreto n. 4. Contributi ripetuti nel testo integrale.",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_1_07_01_supplemento.txt",
+    "text": "--- Pagina 1 ---\nbollettino ufficiale della regione autonoma friuli venezia giulia \u0018 so\u00187 gennaio 2008\nSommario Parte Prima Leggi, regolamenti e atti della \nRegione\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\n",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_2_07_01_supplemento.txt",
+    "text": "--- Pagina 1 ---\nbollettino ufficiale della regione autonoma friuli venezia giulia \u0018 so27 gennaio 2008\nSommario Parte Prima Leggi, regolamenti e atti della \nRegione\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\n",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_2_09_01_ordinario.txt",
+    "text": "--- Pagina 1 ---\nbollettino ufficiale della regione autonoma friuli venezia giulia \u0018 29 gennaio 2008\nSommario Parte Prima Leggi, regolamenti e atti della \nRegione\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\nSommario Parte Terza Concorsi e avvisi\nLegge regionale 2/2008. Contributi statali.\npag. 30\nPARTE TERZA\nCONCORSI E AVVISI\nDecreto n. 3. Contributi comunali.\npag. 40\nPARTE PRIMA\nLEGGI, REGOLAMENTI\nE ATTI DELLA REGIONE\nDecreto n. 4. Contributi ripetuti nel testo integrale.",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_3_16_01_ordinario.txt",
+    "text": "--- Pagina 1 ---\nbollettino ufficiale della regione autonoma friuli venezia giulia \u0018 316 gennaio 2008\nSommario Parte Prima Leggi, regolamenti e atti della \nRegione\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\nSommario Parte Seconda Leggi, regolamenti, atti dello \nLegge regionale 2/2008. Contributi statali.\npag. 30\nPARTE TERZA\nCONCORSI E AVVISI\nDecreto n. 3. Contributi comunali.\npag. 40\nPARTE PRIMA\nLEGGI, REGOLAMENTI\nE ATTI DELLA REGIONE\nDecreto n. 4. Contributi ripetuti nel testo integrale.",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_legacy_5_18_ordinario.txt",
+    "text": "--- Pagina 1 ---\nSOMMARIO\nPARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\nPARTE TERZA\nLegge regionale 2/2008. Contributi statali.\npag. 30\nPARTE TERZA\nCONCORSI E AVVISI\nDecreto n. 3. Contributi comunali.\npag. 40\nPARTE PRIMA\nLEGGI, REGOLAMENTI\nE ATTI DELLA REGIONE\nDecreto n. 4. Contributi ripetuti nel testo integrale.",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_legacy_5_19_ordinario.txt",
+    "text": "--- Pagina 1 ---\nSOMMARIO\nPARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\nPARTE SECONDA\nLegge regionale 2/2008. Contributi statali.\npag. 30\nPARTE TERZA\nCONCORSI E AVVISI\nDecreto n. 3. Contributi comunali.\npag. 40\nPARTE PRIMA\nLEGGI, REGOLAMENTI\nE ATTI DELLA REGIONE\nDecreto n. 4. Contributi ripetuti nel testo integrale.",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_legacy_5_20_ordinario.txt",
+    "text": "--- Pagina 1 ---\nSOMMARIO\nPARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\nPARTE TERZA\nLegge regionale 2/2008. Contributi statali.\npag. 30\nPARTE TERZA\nCONCORSI E AVVISI\nDecreto n. 3. Contributi comunali.\npag. 40\nPARTE PRIMA\nLEGGI, REGOLAMENTI\nE ATTI DELLA REGIONE\nDecreto n. 4. Contributi ripetuti nel testo integrale.",
+    "expected_candidates": 1,
+    "section_found": true
+  },
+  {
+    "name": "BUR_legacy_5_73_supplemento_ordinario.txt",
+    "text": "--- Pagina 1 ---\nSpedizione in abbonamento postale\nLegge 662/96, art. 2, comma 20/c - Filiale di Padova\nIn caso di mancato recapito inviare\nal detentore del conto, per la restituzione al mittente\nche si impegna a pagare la relativa tariffa\nIo Supplemento ordinario al Bollettino Ufficiale n. 13\ndel 31 marzo 1999\nS.O. N. 5\nBOLLETTINO UFFICIAL EDELLA\nREGIONE AUTONOMA FRIULI-VENEZIA GIULIA\nTRIESTE, 2 aprile 1999 L. 5.000\nDIREZIONE E REDAZIONE: PRESIDENZA DELLA GIUNTA REGIONALE - TRIESTE - PIAZZA UNI\nDecreto n. 9. Contributi alle imprese.",
+    "expected_candidates": 0,
+    "section_found": false
+  },
+  {
+    "name": "BUR_legacy_6_21_ordinario.txt",
+    "text": "--- Pagina 1 ---\nSOMMARIO\nPARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\nDecreto del direttore n. 1\nContributi alle imprese.\npag. 20\nPARTE SECONDA\nLegge regionale 2/2008. Contributi statali.\npag. 30\nPARTE TERZA\nCONCORSI E AVVISI\nDecreto n. 3. Contributi comunali.\npag. 40\nPARTE PRIMA\nLEGGI, REGOLAMENTI\nE ATTI DELLA REGIONE\nDecreto n. 4. Contributi ripetuti nel testo integrale.",
+    "expected_candidates": 1,
+    "section_found": true
+  }
+]

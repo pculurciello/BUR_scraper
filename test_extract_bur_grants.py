@@ -152,6 +152,7 @@ class Tests(unittest.TestCase):
             (source / 'cache').mkdir()
             base = source / '2026' / 'BUR_1_02_01_ordinario'
             base.with_suffix('.txt').write_text(
+                'PARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\n'
                 'Decreto del direttore n. 1\nBando per contributi alle imprese.', encoding='utf-8')
             base.with_suffix('.pdf').write_bytes(b'Not parsed: TXT is preferred')
             (source / 'fascicoli.json').write_text('{}')
@@ -180,6 +181,7 @@ class Tests(unittest.TestCase):
             source = root / 'BUR_fvg'
             source.mkdir()
             (source / 'sample.txt').write_text(
+                'PARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\n'
                 'Decreto del direttore n. 1\nBando per contributi alle imprese.\n'
                 'Decreto del direttore n. 2\nAvviso di concorso pubblico.\n'
                 'Deliberazione n. 3\nRipartizione del fondo di riserva.', encoding='utf-8')
@@ -196,6 +198,58 @@ class Tests(unittest.TestCase):
                 rows = [json.loads(line) for line in (output / 'rejected.jsonl').read_text().splitlines()]
                 self.assertEqual(len(rows), 3 - expected)
                 self.assertTrue(all(row['source'] == 'sample.txt' for row in rows))
+
+    def test_section_layouts_from_ten_uploaded_summaries(self):
+        fixture = Path(__file__).parent / 'tests' / 'fixtures' / 'section_layouts.json'
+        cases = json.loads(fixture.read_text(encoding='utf-8'))
+        self.assertEqual(len(cases), 10)
+        for case in cases:
+            with self.subTest(source=case['name']):
+                text = case['text']
+                scope = e.regional_section(text)
+                self.assertEqual(scope is not None, case['section_found'])
+                for mode in ('strict', 'broad'):
+                    rows = list(e.scoped_candidates(text, mode=mode))
+                    self.assertEqual(len(rows), case['expected_candidates'])
+                    for row in rows:
+                        self.assertEqual(row['section'], 'parte_prima')
+                        self.assertEqual(row['text'], text[row['start']:row['end']])
+                        self.assertGreaterEqual(row['start'], scope[0])
+                        self.assertLessEqual(row['end'], scope[1])
+                        self.assertNotIn('Contributi statali', row['text'])
+                        self.assertNotIn('Contributi comunali', row['text'])
+                        self.assertNotIn('ripetuti nel testo integrale', row['text'])
+
+    def test_missing_or_wrong_regional_heading_fails_closed(self):
+        for prefix in ['', 'PARTE PRIMA\nALTRI ATTI\n',
+                       'PARTE SECONDA\nLEGGI DELLO STATO\n',
+                       'Il titolo cita PARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE.\n']:
+            text = prefix + 'Decreto n. 1. Contributi alle imprese.'
+            self.assertIsNone(e.regional_section(text))
+            self.assertEqual(list(e.scoped_candidates(text)), [])
+
+    def test_modern_repeated_summary_heading_keeps_continuation(self):
+        header = 'Sommario Parte Prima Leggi, regolamenti e atti della\nRegione\n'
+        text = header + 'Decreto n. 1. Contributi alle imprese.\npag. 1\n'
+        text += header + 'Decreto n. 2. Contributi alle famiglie.\npag. 2\n'
+        text += 'Sommario Parte Terza Concorsi e avvisi\nDecreto n. 3. Contributi comunali.'
+        self.assertEqual(len(list(e.scoped_candidates(text))), 2)
+
+    def test_cli_missing_section_does_not_contact_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'BUR_fvg'
+            source.mkdir()
+            (source / 'missing.txt').write_text('Decreto n. 1. Contributi alle imprese.')
+            output = Path(tmp) / 'results'
+            with patch.object(sys, 'argv', ['extract_bur_grants.py', str(source), '--output', str(output)]), \
+                 patch.object(e, 'confirm', side_effect=AssertionError('Must not contact model')):
+                self.assertEqual(e.main(), 2)
+            inventory = [json.loads(line) for line in (output / 'inventory.jsonl').read_text().splitlines()]
+            self.assertEqual(inventory[0]['status'], 'section_not_found')
+            summary = json.loads((output / 'filter_summary.json').read_text())
+            self.assertEqual(summary['section_not_found'], 1)
+            self.assertEqual(summary['candidates'], 0)
+            self.assertEqual((output / 'decisions.jsonl').read_text(), '')
 
     def test_pdf_reader_is_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
