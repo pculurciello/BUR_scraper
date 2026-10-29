@@ -22,7 +22,7 @@ un bollettino ordinario possono avere lo stesso numero.
   stato di elaborazione e percorsi dei file.
 - `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.pdf`: sommario PDF separato quando disponibile; in alternativa,
   PDF completo, se il ripiego storico è abilitato.
-- `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.txt`: testo estratto, con separatori di pagina.
+- `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.txt`: testo continuo ripulito dagli a capo di impaginazione e dalle parole sillabate a fine riga.
 - `copertura.csv`: pagine di archivio visitate, fascicoli scoperti, elaborati
   e anomalie di navigazione per anno. Non certifica la completezza dell'archivio.
 - `errori.json`: anomalie di navigazione e annualità assenti. Gli errori dei
@@ -438,3 +438,37 @@ hanno un titolo regionale riconosciuto; il supplemento storico senza titolo è
 escluso. I filtri combinati selezionano 9 candidati contro i 55 del filtro ampio
 originale sull'intero testo. Risultati e limiti nella
 [guida all'estrazione](docs/GRANT_EXTRACTION.md#selezione-obbligatoria-della-parte-prima).
+
+
+
+## Conversione PDF → TXT senza interruzioni di frase
+
+Ogni TXT viene scritto come un unico flusso di testo, senza a capo fisici,
+tabulazioni o separatori `--- Pagina N ---`. Questo evita di spezzare una
+frase anche quando continua nella pagina successiva. Il ritorno a capo visivo
+dell'editor dipende dalla sua impostazione di word wrap, non dal contenuto.
+L'ordine del testo rimane quello restituito dall'estrattore PDF.
+
+Le parole interrotte a fine riga vengono ricomposte: `contri-` + a capo +
+`buti` diventa `contributi`, anche tra due pagine. Vengono gestiti soft hyphen,
+trattini Unicode di sillabazione e spazi introdotti prima del trattino
+(`mo -` + a capo + `dificata` → `modificata`). I trattini interni alla riga,
+i range numerici e identificativi come `COVID-19` rimangono presenti.
+Una lista di prefissi composti comuni conserva casi come `socio-economico`.
+
+La distinzione tra un trattino lessicale e uno tipografico a fine riga e
+inevitabilmente euristica: composti non riconosciuti possono essere uniti.
+Questa pulizia non corregge errori OCR, intestazioni gia presenti nel PDF o
+un ordine di lettura errato di colonne; il PDF originale resta il riferimento.
+
+Per rigenerare i TXT, rieseguire il comando originale nella stessa directory
+di output. I PDF in cache vengono riutilizzati e i TXT registrati vengono
+aggiornati senza cambiare i nomi. `--refresh` non e necessario per cambiare
+la sola conversione.
+
+
+L'estrattore `extract_bur_grants.py` accetta sia i TXT precedenti sia il nuovo
+flusso continuo. In quest'ultimo riconosce le intestazioni di parte e usa i
+riferimenti `pag. N` per separare le voci del sommario, mantenendo gli offset
+nel testo originale. La selezione resta limitata alla Parte Prima regionale;
+i metadati di pagina per ciascuna voce non vengono ricostruiti.
