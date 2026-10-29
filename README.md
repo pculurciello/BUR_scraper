@@ -22,7 +22,7 @@ un bollettino ordinario possono avere lo stesso numero.
   stato di elaborazione e percorsi dei file.
 - `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.pdf`: sommario PDF separato quando disponibile; in alternativa,
   PDF completo, se il ripiego storico è abilitato.
-- `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.txt`: testo continuo ripulito dagli a capo di impaginazione e dalle parole sillabate a fine riga.
+- `ANNO/BUR_NUMERO_GIORNO_MESE_TIPO.txt`: testo con frasi ricomposte, separatori tra periodi e rimozione dei trattini a fine riga.
 - `copertura.csv`: pagine di archivio visitate, fascicoli scoperti, elaborati
   e anomalie di navigazione per anno. Non certifica la completezza dell'archivio.
 - `errori.json`: anomalie di navigazione e annualità assenti. Gli errori dei
@@ -441,38 +441,28 @@ originale sull'intero testo. Risultati e limiti nella
 
 
 
-## Conversione PDF → TXT senza interruzioni di frase
+## Conversione PDF → TXT: frasi e a capo
 
-Ogni TXT viene scritto come un unico flusso di testo, senza a capo fisici,
-tabulazioni o separatori `--- Pagina N ---`. Questo evita di spezzare una
-frase anche quando continua nella pagina successiva. Il ritorno a capo visivo
-dell'editor dipende dalla sua impostazione di word wrap, non dal contenuto.
-L'ordine del testo rimane quello restituito dall'estrattore PDF.
+Gli a capo all'interno di una frase vengono sostituiti con spazi. Gli a capo
+gia presenti dopo la fine di un periodo (`.`, `!`, `?`, `…`, anche seguiti
+da virgolette o parentesi chiuse) sono conservati, inclusi i separatori tra
+paragrafi. Non vengono inseriti nuovi a capo in corrispondenza dei punti.
+Le abbreviazioni comuni (`art.`, `n.`, `D.G.R.`, ecc.) non sono considerate
+una fine di frase. Il riconoscimento resta euristico nei casi ambigui.
+Non vengono aggiunti separatori artificiali `--- Pagina N ---`.
 
-Le parole interrotte a fine riga vengono ricomposte: `contri-` + a capo +
-`buti` diventa `contributi`, anche tra due pagine. Vengono gestiti soft hyphen,
-trattini Unicode di sillabazione e spazi introdotti prima del trattino
-(`mo -` + a capo + `dificata` → `modificata`). I trattini interni alla riga,
-i range numerici e identificativi come `COVID-19` rimangono presenti.
-Una lista di prefissi composti comuni conserva casi come `socio-economico`.
+Ogni trattino `-` a fine riga, anche seguito da spazi prima dell'a capo,
+viene eliminato assieme all'a capo. Si applica la stessa regola ai trattini
+tipografici di sillabazione. La regola vale senza eccezioni: anche
+`socio-` + a capo + `economico` diventa `socioeconomico` e `1998-` + a capo +
+`2003` diventa `19982003`. I trattini interni a una riga sono conservati.
+Le parole spezzate possono essere ricomposte anche fra due pagine.
 
-La distinzione tra un trattino lessicale e uno tipografico a fine riga e
-inevitabilmente euristica: composti non riconosciuti possono essere uniti.
 Questa pulizia non corregge errori OCR, intestazioni gia presenti nel PDF o
 un ordine di lettura errato di colonne; il PDF originale resta il riferimento.
-
-Per rigenerare i TXT, rieseguire il comando originale nella stessa directory
-di output. I PDF in cache vengono riutilizzati e i TXT registrati vengono
-aggiornati senza cambiare i nomi. `--refresh` non e necessario per cambiare
-la sola conversione.
-
-
-L'estrattore `extract_bur_grants.py` accetta sia i TXT precedenti sia il nuovo
-flusso continuo. In quest'ultimo riconosce le intestazioni di parte e usa i
-riferimenti `pag. N` per separare le voci del sommario, mantenendo gli offset
-nel testo originale. La selezione resta limitata alla Parte Prima regionale;
-i metadati di pagina per ciascuna voce non vengono ricostruiti.
-
+Per rigenerare soltanto i TXT usare `--convert-only --output bur_fvg`.
+L'estrattore di contributi accetta sia i TXT precedenti sia il testo con frasi
+ricomposte e mantiene gli offset nel file originale.
 
 
 ## Sola conversione locale PDF → TXT
@@ -510,3 +500,4 @@ la nuova conversione, mentre quei file conservano i metadati dello scraping.
 Un PDF privo di testo richiede OCR: non viene creato un TXT vuoto e un TXT
 preesistente resta intatto. Il codice di uscita e 2 se non ci sono PDF
 selezionati o se almeno un file richiede controllo; altrimenti e 0.
+
