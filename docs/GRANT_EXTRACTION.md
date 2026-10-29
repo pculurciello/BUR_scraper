@@ -3,8 +3,10 @@
 `extract_bur_grants.py` analizza ricorsivamente una directory di sommari BUR FVG
 (ad esempio `BUR_fvg` o `bur_fvg`) in due passaggi:
 
-1. **Filtro deterministico:** separa le voci usando intestazioni di atti e cerca
-   espressioni regolari per leggi, decreti, deliberazioni e termini contributivi.
+1. **Filtro deterministico:** separa le voci usando intestazioni di atti e
+   richiede indizi specifici di una misura contributiva (`--filter-mode strict`,
+   predefinito). Il precedente filtro a parole generiche resta disponibile come
+   `--filter-mode broad` per confronti e controlli di richiamo.
 2. **Conferma semantica:** invia solo le voci candidate a un server vLLM con API
    OpenAI compatibile; richiede JSON strutturato ed estratti letterali verificabili.
 
@@ -108,6 +110,84 @@ DOCX, CSV e JSON) sono registrati come `unsupported_format`. Le directory `cache
 diversa dall'input. Se un bollettino ha soltanto il PDF, occorre produrne il TXT
 prima di usare questo estrattore; il PDF saltato da solo non genera codice 2.
 
+## Filtro più selettivo e confronto con il precedente
+
+Il filtro `strict` riduce le richieste al modello seguendo queste regole:
+
+- I riferimenti di sommario su una riga come `pag. 218` chiudono la voce.
+  Un decreto non assorbe quindi gli avvisi successivi fino al prossimo decreto.
+
+- `bando`, `avviso`, `fondi`, `aiuti` o `sostegno`, isolati, non sono sufficienti.
+  Non basta neppure una generica menzione di finanziamento.
+- Passano strumenti espliciti come contributi, sovvenzioni, sussidi, voucher,
+  ristori, borse di studio, aiuti di Stato/de minimis, finanziamenti agevolati,
+  incentivi economici e agevolazioni finanziarie o fiscali.
+- Finanziamenti, incentivi, agevolazioni e sostegno meno specifici richiedono
+  sia una procedura (bando, criteri, domande, graduatoria, concessione ecc.) sia
+  beneficiari riconoscibili entro 200 caratteri prima/dopo il termine.
+  In questa via meno specifica, riferimenti vicini ad appalti, affidamenti o
+  reclutamento impediscono la selezione. Non è un'esclusione globale: una misura
+  esplicita di contributo per nuove assunzioni resta candidata.
+- Sono neutralizzati usi non contributivi come contributi previdenziali,
+  obbligatori, di bonifica, contributo unificato, contributo ANAC o scientifico.
+  Un'altra menzione autentica di contributo nella stessa voce resta valida.
+- Ogni finestra di una voce lunga deve contenere propri indizi contributivi;
+  non vengono inviate al modello tutte le finestre solo perché la prima contiene
+  una parola pertinente. In modalità `broad` resta il comportamento precedente.
+
+Le verifiche sulle frasi comprimono gli spazi e gli a capo su una copia di lavoro;
+non modificano il testo inviato al modello né i suoi offset. Non si impone un
+bando aperto: regolamenti, proroghe, concessioni, liquidazioni e revoche con
+riferimenti espliciti a contributi restano nel perimetro.
+
+Per ricalcolare il numero di richieste senza chiamare vLLM:
+
+```bash
+python extract_bur_grants.py BUR_fvg --output results --candidates-only
+```
+
+Il comando stampa il numero selezionato e quello del filtro precedente sullo
+stesso input. `filter_summary.json` conserva i conteggi e le ragioni di scarto;
+`inventory.jsonl` contiene i conteggi anche per singolo file. Per ispezionare gli
+scarti, leggere `rejected.jsonl`: include fonte, testo, offset e ragione
+(`no_act_reference`, `no_grant_evidence`, `no_grant_evidence_in_window`). Ogni
+candidato include `filter_reason`, con la regola che lo ha ammesso.
+I conteggi degli scarti mescolano voci intere e finestre: non rappresentano una
+misura di accuratezza e non vanno sottratti direttamente dal numero di candidati.
+
+Per ripristinare il filtro originale e confrontare le voci:
+
+```bash
+python extract_bur_grants.py BUR_fvg --output results_broad \
+  --filter-mode broad --candidates-only
+```
+
+`strict` privilegia la precisione: può omettere bandi che non esplicitano né lo
+strumento economico né i beneficiari, e finestre che dipendono solo da contesto
+lontano. Verificare un campione degli scarti, soprattutto per annate e impaginazioni
+diverse, prima del censimento. Non è stata misurata la riduzione sui 16 mila
+candidati dell'archivio dell'utente: tale cartella non è disponibile qui. Un
+numero elevato di candidati può includere molti atti autentici in 28 annualità.
+
+### Esempi del 2006 forniti dall'utente
+
+I tre estratti in `tests/fixtures/filter_examples_2006.json` passavano tutti con
+il filtro precedente. Il filtro `strict` scarta i primi due e mantiene il terzo:
+
+1. Decreto di esproprio seguito da concorsi sanitari: il decreto termina a
+   `pag. 218` e le voci successive non gli vengono attribuite.
+2. Prelevamento dal fondo spese impreviste per la protezione civile: è un
+   trasferimento di bilancio senza indizi espliciti di contributi.
+3. DGR 1582/2006, ulteriore finanziamento di progetti formativi FSE: resta
+   candidata grazie alla combinazione di finanziamento, approvazione e beneficiari
+   vicini (imprese). È una misura di finanziamento da confermare semanticamente,
+   non un falso positivo da escludere per il solo settore formativo.
+
+Non esiste una blacklist per FSE, formazione o protezione civile. Regole e bandi
+contributivi di questi settori restano nel perimetro. Il terzo esempio è un test
+positivo per evitare di perdere finanziamenti pertinenti durante la riduzione
+delle richieste al modello.
+
 ## Opzioni
 
 | Opzione | Valore predefinito | Significato |
@@ -118,6 +198,7 @@ prima di usare questo estrattore; il PDF saltato da solo non genera codice 2.
 | `--model` | `VLLM_MODEL` oppure `Qwen/Qwen2.5-32B-Instruct` | Nome del modello servito |
 | `--workers` | `4` | Richieste concorrenti, almeno 1 |
 | `--candidates-only` | disattivato | Esegue soltanto lettura e filtro regex |
+| `--filter-mode` | `strict` | `strict` selettivo oppure `broad` per il filtro originale |
 
 Il client usa temperatura 0, massimo 4096 token di risposta, timeout socket di
 180 secondi e fino a tre tentativi con pause di 1 e 2 secondi. Le voci lunghe
@@ -132,7 +213,9 @@ Ogni riga JSONL è un oggetto JSON indipendente, codificato UTF-8.
 | File | Contenuto |
 | --- | --- |
 | `inventory.jsonl` | Un record per file: lettura, conteggi, errori o motivo del salto |
-| `candidates.jsonl` | Voci selezionate dalle regex con fonte, testo e offset |
+| `candidates.jsonl` | Voci selezionate dalle regex con fonte, testo, offset e regola di ammissione |
+| `rejected.jsonl` | Voci/finestre scartate con fonte, testo, offset e motivo |
+| `filter_summary.json` | Confronto dei conteggi selettivi con quelli del filtro originale |
 | `decisions.jsonl` | Tutte le decisioni del modello, anche incerte e fallite |
 | `confirmed.jsonl` | Solo voci con decisione `include` e relativi riferimenti |
 | `cache/*.json` | Risposte validate, riutilizzate nei rerun |
@@ -209,5 +292,8 @@ python -m unittest -v test_extract_bur_grants.py test_scrape_bur_fvg.py
 I test non contattano siti o modelli reali. Coprono tipi di atto, separazione
 delle voci, finestre e offset, validazione delle prove, API simulata e cache,
 errori API, integrazione con le coppie PDF/TXT dello scraper, PDF sempre
-ignorati e assenza di ripiego sui PDF quando il TXT è vuoto. La raccolta
+ignorati e assenza di ripiego sui PDF quando il TXT è vuoto. I test del filtro
+coprono anche avvisi generici, fondi, appalti, assunzioni, contributi obbligatori,
+strumenti e fasi delle misure contributive, contesto vicino, frasi su più righe
+e finestre prive di indizi pertinenti. La raccolta
 1999–2026 e l'inferenza con vLLM reale non sono state eseguite per questa aggiunta.

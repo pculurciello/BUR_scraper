@@ -397,3 +397,22 @@ python scrape_bur_fvg.py --year 2022 --page 5 --refresh --output bur_2022_page5
 
 La validazione riguarda solo le pagine dei risultati dell'archivio: la home
 e le pagine di dettaglio non richiedono lo stesso tipo di link.
+
+
+## Ridurre i candidati prima della conferma vLLM
+
+L'estrattore usa ora il filtro `strict`: non seleziona più una voce per la sola
+presenza di parole generiche come bando, avviso o fondi. Richiede strumenti
+contributivi espliciti o una combinazione vicina di misura finanziaria, procedura
+e beneficiari; neutralizza contributi obbligatori/previdenziali e riduce le
+finestre senza indizi contributivi.
+
+```bash
+python extract_bur_grants.py BUR_fvg --output results --candidates-only
+```
+
+Il comando confronta il numero selezionato con quello del filtro originale.
+Controllare `filter_summary.json` e un campione di `rejected.jsonl` prima di
+avviare il modello. `--filter-mode broad` ripristina il filtro precedente.
+La selezione più stretta può perdere voci dal titolo generico: dettagli e limiti
+nella [guida all'estrazione](docs/GRANT_EXTRACTION.md#filtro-più-selettivo-e-confronto-con-il-precedente).

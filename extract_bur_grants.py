@@ -4,6 +4,7 @@ See docs/GRANT_EXTRACTION.md for setup, model configuration and limitations.
 """
 import argparse
 import concurrent.futures as futures
+from collections import Counter
 import hashlib
 import json
 import os
@@ -15,7 +16,63 @@ import urllib.request
 ACT = r'(?:legg[ei](?:\s+regional[ei])?|l\s*\.\s*r\s*\.|decret[oi]|d\s*\.\s*p\s*\.?\s*r\s*\.?|d\s*\.\s*d\s*\.?|deliberazion[ei]|deliber[ae]|d\s*\.\s*g\s*\.?\s*r\s*\.?)'
 ACT_RE = re.compile(r'\b' + ACT, re.I)
 HEAD = re.compile(r'^\s*(?:\d+\s*[-|:]?\s*)?' + ACT, re.I | re.M)
-GRANT = re.compile(r'\b(?:contribut\w*|sovvenzion\w*|finanziament\w*|agevolazion\w*|incentiv\w*|aiut[oi]|sussidi\w*|voucher|ristor\w*|bors[ae]\s+di\s+studio|band[oi]|avvis[oi]|fond[oi]|sostegn\w*)\b', re.I)
+BROAD_GRANT = re.compile(r'\b(?:contribut\w*|sovvenzion\w*|finanziament\w*|agevolazion\w*|incentiv\w*|aiut[oi]|sussidi\w*|voucher|ristor\w*|bors[ae]\s+di\s+studio|band[oi]|avvis[oi]|fond[oi]|sostegn\w*)\b', re.I)
+# Summary page locators end a voice, preventing spillover into later notices.
+ENTRY_END = re.compile(r'^[ \t]*pag(?:ina)?\.?[ \t]*\d+(?:[ \t]*[-–,][ \t]*\d+)*[ \t]*(?:\n|$)', re.I | re.M)
+# Explicit monetary instruments. Generic notices/funds are not grant evidence.
+GRANT = re.compile(
+    r'\b(?:contribut[oi]|sovvenzion[ei]|sussidi[oi]|voucher|ristor[oi]|'
+    r'bors[ae]\s+di\s+studio|aiut[oi]\s+(?:di\s+stato|alle?\s+imprese)|'
+    r'de\s+minimis|finanziament[oi]\s+(?:agevolat[oi]|a\s+fondo\s+perduto)|'
+    r'agevolazion[ei]\s+(?:finanziari[ae]|fiscali)|'
+    r'incentivi\s+(?:economici|finanziari))\b', re.I)
+WEAK_GRANT = re.compile(
+    r'\b(?:finanziament[oi]|agevolazion[ei]|incentiv[oi]|sostegno)\b', re.I)
+BENEFICIARY = re.compile(
+    r'\b(?:imprese|imprenditor\w*|aziende|associazioni|famiglie|cittadini|'
+    r'student\w*|beneficiari\w*|agricoltor\w*|cooperative|comuni|enti\s+locali|'
+    r'organizzazioni|soggetti\s+(?:pubblici|privati)|disoccupati|giovani|'
+    r'enti\s+del\s+terzo\s+settore)\b', re.I)
+PROCEDURE = re.compile(
+    r'\b(?:band[oi]|avvis[oi]|concession[ei]|erogazion[ei]|assegnazion[ei]|'
+    r'liquidazion[ei]|approvazion[ei]|graduatori[ae]|domand[ae]|criteri|regolament\w*|'
+    r'beneficiari\w*|prorog\w*|revoc\w*|ripart\w*|termini|modalit[àa])\b', re.I)
+# Remove only specific non-grant meanings, never all uses of "contributi".
+NON_GRANT = re.compile(
+    r'\bcontribut[oi]\s+(?:(?:di|per)\s+(?:gara|partecipazione\s+alla\s+gara)|'
+    r'(?:a\s+favore\s+(?:di|dell[\'’])\s*)?(?:ANAC|AVCP)|'
+    r'unificat[oi]|previdenzial\w*|pensionistic\w*|'
+    r'assicurativ\w*|obbligator\w*|consortil\w*|di\s+bonifica|'
+    r'(?:scientific[oi]|teoric[oi])|all[\'’]?(?:a\s+)?(?:conoscenza|analisi|discussione))\b', re.I)
+NON_GRANT_CONTEXT = re.compile(
+    r'\b(?:appalt\w*|affidament\w*|aggiudicazion\w*|gara\s+d[\'’]appalto|'
+    r'assunzion\w*|reclutament\w*|concorso\s+pubblico|'
+    r'incaric\w*\s+professional\w*)\b', re.I)
+
+
+def grant_reason(text, mode='strict'):
+    """Return an auditable acceptance rule; None means no grant evidence.
+
+    Work on a whitespace-folded copy only: offsets and LLM evidence remain
+    anchored to the original normalized TXT, including its line breaks.
+    """
+    if mode == 'broad':
+        return 'legacy_keyword' if BROAD_GRANT.search(text) else None
+    folded = ' '.join(text.split())
+    cleaned = NON_GRANT.sub(' ', folded)
+    if GRANT.search(cleaned):
+        return 'explicit_grant_instrument'
+    # Weak financial language needs both procedure and recipient context nearby.
+    # Procurement/recruitment is excluded only on this weaker route; a real
+    # explicit grant in a mixed entry still survives for semantic confirmation.
+    for match in WEAK_GRANT.finditer(cleaned):
+        context = cleaned[max(0, match.start() - 200):match.end() + 200]
+        if (PROCEDURE.search(context) and BENEFICIARY.search(context)
+                and not NON_GRANT_CONTEXT.search(context)):
+            return 'financial_measure_with_procedure_and_beneficiary'
+    return None
+
+
 KINDS = ['law', 'presidential_decree', 'directors_decree', 'deliberation']
 SCHEMA = {'type': 'object', 'additionalProperties': False, 'properties': {
     'decision': {'type': 'string', 'enum': ['include', 'exclude', 'uncertain']},
@@ -53,15 +110,33 @@ def read(path):
     return text
 
 
-def candidates(text, size=10000, overlap=1500):
-    boundaries = sorted({0, len(text), *(m.start() for m in HEAD.finditer(text))})
+def candidates(text, size=10000, overlap=1500, mode='strict', rejected=None):
+    if not 0 <= overlap < size:
+        raise ValueError('Require 0 <= overlap < size')
+    if mode not in ('strict', 'broad'):
+        raise ValueError('Unknown filter mode')
+    boundaries = {0, len(text), *(m.start() for m in HEAD.finditer(text))}
+    if mode == 'strict':
+        boundaries.update(m.end() for m in ENTRY_END.finditer(text))
+    boundaries = sorted(boundaries)
     for start, end in zip(boundaries, boundaries[1:]):
         entry = text[start:end]
-        if not ACT_RE.search(entry) or not GRANT.search(entry):
+        reason = grant_reason(entry, mode) if ACT_RE.search(entry) else None
+        if not reason:
+            if rejected is not None:
+                rejected.append({'start': start, 'end': end, 'text': entry,
+                                 'reason': 'no_act_reference' if not ACT_RE.search(entry)
+                                           else 'no_grant_evidence'})
             continue
         for offset in range(0, len(entry), size - overlap):
             chunk = entry[offset:offset + size]
-            yield {'start': start + offset, 'end': start + offset + len(chunk), 'text': chunk}
+            chunk_reason = grant_reason(chunk, mode)
+            if mode == 'broad' or chunk_reason:
+                yield {'start': start + offset, 'end': start + offset + len(chunk),
+                       'text': chunk, 'filter_reason': chunk_reason or reason}
+            elif rejected is not None:
+                rejected.append({'start': start + offset, 'end': start + offset + len(chunk),
+                                 'text': chunk, 'reason': 'no_grant_evidence_in_window'})
             if offset + size >= len(entry):
                 break
 
@@ -127,6 +202,8 @@ def main():
     parser.add_argument('--model', default=os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-32B-Instruct'))
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--candidates-only', action='store_true')
+    parser.add_argument('--filter-mode', choices=['strict', 'broad'], default='strict',
+                        help='strict: grant-specific evidence; broad: original high-recall keywords')
     args = parser.parse_args()
     if not args.input.is_dir() or args.workers < 1:
         parser.error('Input must be an existing directory; workers must be positive')
@@ -135,7 +212,10 @@ def main():
         parser.error('Input and output must differ')
     (args.output / 'cache').mkdir(parents=True, exist_ok=True)
     pending, failures = [], False
-    with (args.output / 'inventory.jsonl').open('w', encoding='utf-8') as inventory:
+    rejected_counts = Counter()
+    broad_total = 0
+    with (args.output / 'inventory.jsonl').open('w', encoding='utf-8') as inventory, \
+         (args.output / 'rejected.jsonl').open('w', encoding='utf-8') as rejection_log:
         for path in sorted(args.input.rglob('*')):
             if (not path.is_file() or args.output in path.parents
                     or any(part in {'cache', '.git', '__pycache__'}
@@ -153,9 +233,18 @@ def main():
                 text = read(path).replace('\r\n', '\n').replace('\u00ad', '').replace('\xa0', ' ')
                 if not text.strip():
                     raise ValueError('Empty TXT file: regenerate the bulletin text before extraction')
-                items = [{**c, 'source': source} for c in candidates(text)]
+                rejected = []
+                items = [{**c, 'source': source} for c in
+                         candidates(text, mode=args.filter_mode, rejected=rejected)]
+                broad_count = (len(items) if args.filter_mode == 'broad' else
+                               sum(1 for _ in candidates(text, mode='broad')))
+                broad_total += broad_count
+                for item in rejected:
+                    rejected_counts[item['reason']] += 1
+                    rejection_log.write(json.dumps({**item, 'source': source}, ensure_ascii=False) + '\n')
                 pending.extend(items)
-                record.update(status='ok', characters=len(text), candidates=len(items))
+                record.update(status='ok', characters=len(text), candidates=len(items),
+                              broad_candidates=broad_count, filter_mode=args.filter_mode)
             except Exception as exc:
                 record.update(status='read_error', error=str(exc))
                 failures = True
@@ -163,7 +252,11 @@ def main():
     with (args.output / 'candidates.jsonl').open('w', encoding='utf-8') as handle:
         for candidate in pending:
             handle.write(json.dumps(candidate, ensure_ascii=False) + '\n')
-    print(f'{len(pending)} candidates', flush=True)
+    summary = {'filter_mode': args.filter_mode, 'candidates': len(pending),
+               'broad_candidates': broad_total, 'rejected_reasons': dict(rejected_counts)}
+    (args.output / 'filter_summary.json').write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
+    print(f'{len(pending)} candidates (original broad filter: {broad_total})', flush=True)
     if not args.candidates_only:
         with futures.ThreadPoolExecutor(max_workers=args.workers) as pool, \
              (args.output / 'decisions.jsonl').open('w', encoding='utf-8') as audit, \
