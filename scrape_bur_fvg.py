@@ -404,6 +404,44 @@ def document_basename(root, source_url, document_type, archive_year=None):
     raise ValueError('URL privo di bnum e non appartenente al dettaglio ASP storico')
 
 
+# Common genuine compounds keep their hyphen even if it falls at a line end.
+COMPOUND_PREFIXES = {
+    'socio', 'tecnico', 'politico', 'economico', 'storico', 'giuridico',
+    'scientifico', 'culturale', 'pubblico', 'amministrativo', 'artistico',
+    'fisico', 'chimico', 'psico',
+}
+
+
+def reflow_pdf_text(page_texts):
+    """Testo continuo: niente a capo di impaginazione, ne separatori di pagina."""
+    text = '\n'.join(page_texts).replace('\r\n', '\n').replace('\r', '\n')
+    # Soft hyphens are discretionary typography, including inside a line.
+    text = re.sub(r'\u00ad[ \t]*\n[ \t\n]*', '', text).replace('\u00ad', '')
+    wrapped_word = re.compile(r'([^\W\d_]+)([ \t]*)([-\u2010])[ \t]*\n[ \t\n]*([^\W\d_]+)')
+
+    def unwrap(match):
+        left, before, hyphen, right = match.groups()
+        # A spaced dash after a complete-looking word usually separates
+        # clauses. Short PDF fragments such as "mo -" still get rejoined.
+        if before and (len(left) > 3 or not right[0].islower()):
+            return f'{left} {hyphen} {right}'
+        if right[0].islower() and left.casefold() not in COMPOUND_PREFIXES:
+            return left + right
+        return left + hyphen + right
+
+    # More than two fragments may belong to the same word.
+    while True:
+        joined = wrapped_word.sub(unwrap, text)
+        if joined == text:
+            break
+        text = joined
+    # Keep hyphens in ranges and identifiers such as 1998-2003 or COVID-19.
+    text = re.sub(r'(?<=\w)([-\u2010])[ \t]*\n[ \t\n]*(?=\w)', r'\1', text)
+    # A single logical line guarantees that even cross-page sentences are
+    # not split by inserted newlines. Editors may still wrap the display.
+    return ' '.join(text.split())
+
+
 def save_document_files(root, base, source_url, data, text):
     """Assegna _2, _3, ... alle collisioni e conserva la scelta nei rerun."""
     source_url = canonical(source_url)
@@ -501,13 +539,13 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         count = len(reader.pages)
         row['pagine_pdf'] = count
         limit = count if summaries else min(count, legacy_pages)
-        text = '\n\n'.join(f'--- Pagina {i+1} ---\n{reader.pages[i].extract_text() or ""}'
-                           for i in range(limit))
+        page_texts = [reader.pages[i].extract_text() or '' for i in range(limit)]
+        text = reflow_pdf_text(page_texts)
         pdfpath, txtpath = save_document_files(root, base, url, data, text)
         row['pdf'] = pdfpath.relative_to(root).as_posix()
         row['testo'] = txtpath.relative_to(root).as_posix()
         row['pagine_estratte'] = limit
-        has_text = any((reader.pages[i].extract_text() or '').strip() for i in range(limit))
+        has_text = bool(text)
         row['stato'] = ('ok' if summaries else 'da_verificare') if has_text else 'ocr_necessario'
         if row['titolo_discordante'] and row['stato'] == 'ok':
             row['stato'] = 'da_verificare'
@@ -620,6 +658,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
