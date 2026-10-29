@@ -299,4 +299,40 @@ class Tests(unittest.TestCase):
             with patch.object(e.urllib.request, 'urlopen', side_effect=OSError('offline')), patch.object(e.time, 'sleep'):
                 self.assertEqual(e.confirm({'text': 'Legge contributi'}, args)['decision'], 'error')
             self.assertEqual(list((args.output / 'cache').iterdir()), [])
+
+
+
+
+class ReflowedInputTests(unittest.TestCase):
+    def test_reflowed_layout_fixtures_keep_scoping_and_candidate_counts(self):
+        from scrape_bur_fvg import reflow_pdf_text
+        fixture = Path(__file__).parent / 'tests' / 'fixtures' / 'section_layouts.json'
+        for case in json.loads(fixture.read_text(encoding='utf-8')):
+            with self.subTest(source=case['name']):
+                text = reflow_pdf_text([case['text']])
+                scope = e.regional_section(text)
+                self.assertEqual(scope is not None, case['section_found'])
+                for mode in ('strict', 'broad'):
+                    rows = list(e.scoped_candidates(text, mode=mode))
+                    self.assertEqual(len(rows), case['expected_candidates'])
+                    for row in rows:
+                        self.assertEqual(row['text'], text[row['start']:row['end']])
+                        self.assertNotIn('Contributi comunali', row['text'])
+                        self.assertNotIn('Contributi statali', row['text'])
+
+    def test_continuous_entries_do_not_spill_into_following_notice(self):
+        text = ('Sommario Parte Prima Leggi, regolamenti e atti della Regione '
+                'Decreto del direttore n. 1. Contributi alle imprese. pag. 2 '
+                'Decreto del direttore n. 2. Assunzione personale. pag. 3 '
+                'Sommario Parte Terza Concorsi e avvisi Decreto n. 3. Contributi comunali.')
+        rows = list(e.scoped_candidates(text))
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn('Assunzione', rows[0]['text'])
+        self.assertNotIn('comunali', rows[0]['text'])
+
+    def test_incidental_flat_heading_is_not_a_regional_section(self):
+        text = ('Il titolo cita PARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE. '
+                'Decreto n. 1. Contributi alle imprese.')
+        self.assertIsNone(e.regional_section(text))
+
 if __name__ == '__main__': unittest.main()
