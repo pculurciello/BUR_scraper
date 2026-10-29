@@ -564,8 +564,62 @@ def write_csv(path, rows, fields):
     tmp.replace(path)
 
 
+def convert_existing_pdfs(root, year=None, limit=0):
+    """Rigenera solo i TXT locali, senza Client HTTP o metadati remoti."""
+    excluded = {'cache', 'diagnostics', '.git', '.venv', '__pycache__'}
+    files = []
+    for path in root.rglob('*'):
+        if not path.is_file() or path.is_symlink() or path.suffix.lower() != '.pdf':
+            continue
+        relative = path.relative_to(root)
+        if any(part.lower() in excluded for part in relative.parts[:-1]):
+            continue
+        if year is not None and str(year) not in path.parent.parts:
+            continue
+        files.append(path)
+    files.sort()
+    if limit:
+        files = files[:limit]
+    fields = ['pdf', 'testo', 'stato', 'pagine_pdf', 'pagine_estratte', 'errore']
+    rows = []
+    for path in files:
+        target = path.with_suffix('.txt')
+        row = dict(pdf=path.relative_to(root).as_posix(),
+                   testo=target.relative_to(root).as_posix(), stato='',
+                   pagine_pdf=0, pagine_estratte=0, errore='')
+        try:
+            reader = PdfReader(path)
+            row['pagine_pdf'] = len(reader.pages)
+            text = reflow_pdf_text([page.extract_text() or '' for page in reader.pages])
+            row['pagine_estratte'] = len(reader.pages)
+            if text:
+                temporary = target.with_suffix('.txt.tmp')
+                temporary.write_text(text, encoding='utf-8')
+                temporary.replace(target)
+                row['stato'] = 'ok'
+            else:
+                # Non sostituire un eventuale TXT utile con un file vuoto.
+                row['stato'] = 'ocr_necessario'
+                LOG.warning('%s: nessun testo estratto; TXT esistente preservato', path)
+        except Exception as exc:
+            row['stato'], row['errore'] = 'errore', str(exc)
+            LOG.warning('%s: %s', path, exc)
+        rows.append(row)
+        write_csv(root / 'conversione.csv', rows, fields)
+    # Scrivi un report con intestazioni anche se nessun PDF corrisponde.
+    if not rows:
+        write_csv(root / 'conversione.csv', rows, fields)
+        LOG.warning('Nessun PDF locale selezionato in %s', root)
+        return 2
+    problematic = sum(row['stato'] != 'ok' for row in rows)
+    LOG.info('Conversione locale: %s PDF, %s da controllare', len(rows), problematic)
+    return 2 if problematic else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--convert-only', action='store_true',
+                    help='Converte solo i PDF gia presenti in --output, senza rete')
     ap.add_argument('--year', type=int, help='Seleziona una sola annualita (imposta --dal e --al)')
     ap.add_argument('--page', type=int, help='Elabora solo questa pagina dei risultati per un singolo anno')
     ap.add_argument('--dal', type=int, default=1999)
@@ -589,9 +643,12 @@ def main():
     ap.add_argument('--legacy-pages', type=int, default=12,
                     help='Senza sommario separato, estrae N pagine iniziali dal PDF completo; '
                          'sono candidate da verificare. 0 disabilita il ripiego.')
-    ap.add_argument('--limit', type=int, default=0, help='Elabora solo N fascicoli per anno (prova)')
+    ap.add_argument('--limit', type=int, default=0,
+                    help='Elabora N fascicoli per anno; in conversione limita il totale dei PDF')
     ap.add_argument('--solo-indice', action='store_true', help='Scopre i fascicoli senza scaricare PDF')
     args = ap.parse_args()
+    if args.convert_only and (args.page is not None or args.solo_indice):
+        ap.error('--convert-only non e compatibile con --page o --solo-indice')
     if args.year is not None:
         args.dal = args.al = args.year
     if args.page is not None and (args.page < 1 or args.dal != args.al):
@@ -604,9 +661,13 @@ def main():
             or args.timeout <= 0 or args.retry_max_wait <= 0):
         ap.error('Parametri numerici non validi')
     root = args.output
+    if args.convert_only and not root.is_dir():
+        ap.error('--convert-only richiede una directory --output esistente')
     root.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',
                         handlers=[logging.StreamHandler(), logging.FileHandler(root/'scraping.log', encoding='utf-8')])
+    if args.convert_only:
+        return convert_existing_pdfs(root, year=args.year, limit=args.limit)
     try:
         client = Client(root, args.delay, args.timeout, args.retries, args.refresh,
                         ca_file=args.ca_file, use_certifi=args.certifi,
@@ -658,6 +719,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
