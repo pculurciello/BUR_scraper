@@ -335,4 +335,17 @@ class ReflowedInputTests(unittest.TestCase):
                 'Decreto n. 1. Contributi alle imprese.')
         self.assertIsNone(e.regional_section(text))
 
+class SentenceParagraphInputTests(unittest.TestCase):
+    def test_inline_headers_with_sentence_breaks_keep_scoping(self):
+        text = ('Bollettino ufficiale Sommario Parte Prima Leggi, regolamenti e atti della Regione '
+                'Decreto n. 1. Contributi alle imprese.\npag. 2 '
+                'Decreto n. 2. Assunzione personale.\npag. 3 '
+                'Sommario Parte Terza Concorsi e avvisi Decreto n. 3. Contributi comunali.')
+        rows = list(e.scoped_candidates(text))
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn('Assunzione', rows[0]['text'])
+        self.assertNotIn('comunali', rows[0]['text'])
+        self.assertEqual(rows[0]['text'], text[rows[0]['start']:rows[0]['end']])
+
 if __name__ == '__main__': unittest.main()
+
