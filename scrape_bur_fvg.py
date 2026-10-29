@@ -404,42 +404,43 @@ def document_basename(root, source_url, document_type, archive_year=None):
     raise ValueError('URL privo di bnum e non appartenente al dettaglio ASP storico')
 
 
-# Common genuine compounds keep their hyphen even if it falls at a line end.
-COMPOUND_PREFIXES = {
-    'socio', 'tecnico', 'politico', 'economico', 'storico', 'giuridico',
-    'scientifico', 'culturale', 'pubblico', 'amministrativo', 'artistico',
-    'fisico', 'chimico', 'psico',
-}
+def ends_sentence(line):
+    """Riconosce la punteggiatura finale, escludendo abbreviazioni comuni."""
+    tail = line.rstrip().rstrip('"\'»”’)]}').rstrip()
+    if not tail or tail[-1] not in '.!?…':
+        return False
+    if tail.endswith('.'):
+        if re.search(r'\b(?:artt?|nn?|commi?|c|lett|pp?|pagg?|dott|prof|sig|'
+                     r'sigg|ing|avv|ecc|etc|tel|prot|reg|all)\.$', tail, re.I):
+            return False
+        if re.search(r'\b(?:[A-Za-z]\.){2,}$', tail):
+            return False
+        if re.search(r'\b[A-ZÀ-ÖØ-Þ]\.$', tail):
+            return False
+    return True
 
 
 def reflow_pdf_text(page_texts):
-    """Testo continuo: niente a capo di impaginazione, ne separatori di pagina."""
+    """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     text = '\n'.join(page_texts).replace('\r\n', '\n').replace('\r', '\n')
-    # Soft hyphens are discretionary typography, including inside a line.
-    text = re.sub(r'\u00ad[ \t]*\n[ \t\n]*', '', text).replace('\u00ad', '')
-    wrapped_word = re.compile(r'([^\W\d_]+)([ \t]*)([-\u2010])[ \t]*\n[ \t\n]*([^\W\d_]+)')
+    # Remove EVERY line-final hyphen, including genuine compounds and ranges.
+    # Short PDF fragments sometimes have an extra space before the hyphen.
+    def remove_spaced_hyphen(match):
+        word = match.group(1)
+        return word + ('' if len(word) <= 3 else ' ')
 
-    def unwrap(match):
-        left, before, hyphen, right = match.groups()
-        # A spaced dash after a complete-looking word usually separates
-        # clauses. Short PDF fragments such as "mo -" still get rejoined.
-        if before and (len(left) > 3 or not right[0].islower()):
-            return f'{left} {hyphen} {right}'
-        if right[0].islower() and left.casefold() not in COMPOUND_PREFIXES:
-            return left + right
-        return left + hyphen + right
-
-    # More than two fragments may belong to the same word.
-    while True:
-        joined = wrapped_word.sub(unwrap, text)
-        if joined == text:
-            break
-        text = joined
-    # Keep hyphens in ranges and identifiers such as 1998-2003 or COVID-19.
-    text = re.sub(r'(?<=\w)([-\u2010])[ \t]*\n[ \t\n]*(?=\w)', r'\1', text)
-    # A single logical line guarantees that even cross-page sentences are
-    # not split by inserted newlines. Editors may still wrap the display.
-    return ' '.join(text.split())
+    text = re.sub(r'([^\W\d_]+)[ \t]+[-\u2010\u00ad][ \t]*\n[ \t\n]*',
+                  remove_spaced_hyphen, text)
+    text = re.sub(r'[-\u2010\u00ad][ \t]*\n[ \t\n]*', '', text)
+    text = text.replace('\u00ad', '')
+    text = re.sub(r'[^\S\n]+', ' ', text)
+    # Preserve existing line/paragraph separators only after a sentence end;
+    # do not insert new boundaries at each dot (dates, abbreviations, etc.).
+    text = re.sub(r'([^\n]*)(\n+)',
+                  lambda m: m.group(1).strip() +
+                  (m.group(2) if ends_sentence(m.group(1)) else ' '), text)
+    text = re.sub(r' *\n *', '\n', text)
+    return text.strip()
 
 
 def save_document_files(root, base, source_url, data, text):
@@ -719,6 +720,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
