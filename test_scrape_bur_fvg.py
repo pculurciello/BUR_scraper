@@ -461,8 +461,7 @@ class PdfTextReflowTests(unittest.TestCase):
     def test_sentence_has_no_layout_or_page_breaks(self):
         text = bur.reflow_pdf_text(['La Regione\nconcede contributi',
                                    'alle imprese.\n\nLa domanda\tva inviata.'])
-        self.assertEqual(text, 'La Regione concede contributi alle imprese. La domanda va inviata.')
-        self.assertNotIn('\n', text)
+        self.assertEqual(text, 'La Regione concede contributi alle imprese.\n\nLa domanda va inviata.')
         self.assertNotIn('Pagina', text)
 
     def test_wrapped_words_are_rejoined(self):
@@ -487,12 +486,12 @@ class PdfTextReflowTests(unittest.TestCase):
                          'contributi e risorse regionali.')
         self.assertEqual(bur.reflow_pdf_text(['con\u00adtributi']), 'contributi')
 
-    def test_real_hyphens_ranges_and_spaced_dashes_survive(self):
+    def test_all_line_final_hyphens_are_removed(self):
         text = bur.reflow_pdf_text(['socio-\neconomico e tecnico-scientifico. '
                                    'FRIULI-\nVENEZIA. COVID-\n19. 1998-\n2003. '
                                    'Titolo -\n nota.'])
-        self.assertEqual(text, 'socio-economico e tecnico-scientifico. FRIULI-VENEZIA. '
-                              'COVID-19. 1998-2003. Titolo - nota.')
+        self.assertEqual(text, 'socioeconomico e tecnico-scientifico. FRIULIVENEZIA. '
+                              'COVID19. 19982003. Titolo nota.')
 
     def test_empty_pages_remain_empty(self):
         self.assertEqual(bur.reflow_pdf_text(['', '  \n\t', '']), '')
@@ -618,7 +617,40 @@ class ConversionOnlyTests(unittest.TestCase):
                 self.assertEqual(result.exception.code, 2)
                 client.assert_not_called()
 
+class SentenceBoundaryReflowTests(unittest.TestCase):
+    def test_preserves_existing_sentence_and_paragraph_separators(self):
+        self.assertEqual(bur.reflow_pdf_text(['Prima frase.\nSeconda frase!\n\nTerza frase?']),
+                         'Prima frase.\nSeconda frase!\n\nTerza frase?')
+
+    def test_joins_newlines_only_inside_sentence(self):
+        self.assertEqual(bur.reflow_pdf_text(['La Regione\nconcede contributi\n\nalle imprese.\nNuovo periodo.']),
+                         'La Regione concede contributi alle imprese.\nNuovo periodo.')
+
+    def test_abbreviations_do_not_end_sentence(self):
+        self.assertEqual(bur.reflow_pdf_text(['Ai sensi dell’art.\n3 e della D.G.R.\nn.\n12.\nLe domande sono aperte.']),
+                         'Ai sensi dell’art. 3 e della D.G.R. n. 12.\nLe domande sono aperte.')
+
+    def test_preserves_boundary_after_closing_quote(self):
+        self.assertEqual(bur.reflow_pdf_text(['La Regione dice «Procedere.»\nNuova frase.']),
+                         'La Regione dice «Procedere.»\nNuova frase.')
+
+    def test_preserves_sentence_boundary_across_pages(self):
+        self.assertEqual(bur.reflow_pdf_text(['Fine del primo periodo.', 'Inizio del successivo.']),
+                         'Fine del primo periodo.\nInizio del successivo.')
+
+    def test_removes_line_final_hyphens_without_exceptions(self):
+        cases = [('socio-\neconomico', 'socioeconomico'),
+                 ('FRIULI-\nVENEZIA', 'FRIULIVENEZIA'),
+                 ('1998-\n2003', '19982003'),
+                 ('COVID-  \r\n19', 'COVID19'),
+                 ('a-\nb-\nc', 'abc'),
+                 ('tecnico-scientifico', 'tecnico-scientifico')]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(bur.reflow_pdf_text([raw]), expected)
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
