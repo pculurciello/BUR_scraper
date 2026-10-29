@@ -457,7 +457,68 @@ class EmptyArchiveResponseTests(unittest.TestCase):
         self.client.page(bur.HOME)
         self.client.opener.open.assert_called_once()
 
+class PdfTextReflowTests(unittest.TestCase):
+    def test_sentence_has_no_layout_or_page_breaks(self):
+        text = bur.reflow_pdf_text(['La Regione\nconcede contributi',
+                                   'alle imprese.\n\nLa domanda\tva inviata.'])
+        self.assertEqual(text, 'La Regione concede contributi alle imprese. La domanda va inviata.')
+        self.assertNotIn('\n', text)
+        self.assertNotIn('Pagina', text)
+
+    def test_wrapped_words_are_rejoined(self):
+        cases = [
+            ('contri-\nbuti', 'contributi'),
+            ('contri-  \n  buti', 'contributi'),
+            ('mo -\ndificata', 'modificata'),
+            ('le -\ngislatura', 'legislatura'),
+            ('suben-\ntrato', 'subentrato'),
+            ('con-\ntri-\nbuti', 'contributi'),
+            ('contribu\u2010\nzioni', 'contribuzioni'),
+        ]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(bur.reflow_pdf_text([raw]), expected)
+
+    def test_word_across_pages_is_rejoined(self):
+        self.assertEqual(bur.reflow_pdf_text(['contribu-', 'zioni alle imprese.']), 'contribuzioni alle imprese.')
+
+    def test_soft_hyphens_and_unicode_spaces(self):
+        self.assertEqual(bur.reflow_pdf_text(['contri\u00ad\nbuti e risorse\u00a0regionali.']),
+                         'contributi e risorse regionali.')
+        self.assertEqual(bur.reflow_pdf_text(['con\u00adtributi']), 'contributi')
+
+    def test_real_hyphens_ranges_and_spaced_dashes_survive(self):
+        text = bur.reflow_pdf_text(['socio-\neconomico e tecnico-scientifico. '
+                                   'FRIULI-\nVENEZIA. COVID-\n19. 1998-\n2003. '
+                                   'Titolo -\n nota.'])
+        self.assertEqual(text, 'socio-economico e tecnico-scientifico. FRIULI-VENEZIA. '
+                              'COVID-19. 1998-2003. Titolo - nota.')
+
+    def test_empty_pages_remain_empty(self):
+        self.assertEqual(bur.reflow_pdf_text(['', '  \n\t', '']), '')
+
+    def test_fetch_writes_continuous_text_and_extracts_each_page_once(self):
+        url = bur.HOME+'visionaBUR?bnum=2020/04/08/17'
+        title = 'NUMERO 17 - 8 APRILE 2020'
+        client = Mock()
+        client.page.return_value = bur.Page('<div class="box-titolo">'+title+'</div>'
+            '<a href="/newbur/downloadPDF?doc=0&amp;name=test.pdf">Sommario</a>')
+        client.get.return_value = b'%PDF-test'
+        reader = Mock()
+        reader.pages = [Mock(), Mock()]
+        reader.pages[0].extract_text.return_value = 'La Regione concede contri-'
+        reader.pages[1].extract_text.return_value = 'buti alle\nimprese.'
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(bur, 'PdfReader', return_value=reader), \
+             patch.object(bur, 'pdf_document_title', return_value=('BUR n. 17', 'pdf_metadata')):
+            row = bur.fetch_summary(client, 2020, url, title, Path(tmp), 12)
+            self.assertEqual(row['stato'], 'ok')
+            self.assertEqual((Path(tmp)/row['testo']).read_text(), 'La Regione concede contributi alle imprese.')
+            for page in reader.pages:
+                page.extract_text.assert_called_once_with()
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
