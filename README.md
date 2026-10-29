@@ -472,3 +472,41 @@ flusso continuo. In quest'ultimo riconosce le intestazioni di parte e usa i
 riferimenti `pag. N` per separare le voci del sommario, mantenendo gli offset
 nel testo originale. La selezione resta limitata alla Parte Prima regionale;
 i metadati di pagina per ciascuna voce non vengono ricostruiti.
+
+
+
+## Sola conversione locale PDF → TXT
+
+Per rigenerare i TXT dei PDF gia scaricati, senza richieste al portale:
+
+```bash
+python scrape_bur_fvg.py --convert-only --output bur_fvg
+```
+
+La directory deve esistere. Lo script cerca ricorsivamente file `.pdf` (anche
+`.PDF`), salta le directory `cache`, `diagnostics`, `.git`, `.venv` e
+`__pycache__`, ignora i PDF che sono link simbolici e salva il TXT accanto al
+PDF con lo stesso nome di base. I TXT esistenti vengono sostituiti solo dopo
+una conversione riuscita. Tutte le pagine di ogni PDF vengono convertite:
+anche i PDF integrali storici, senza il limite `--legacy-pages` dello scraping.
+Si applica la stessa pulizia degli a capo e della sillabazione.
+
+Per una sola annualita organizzata in una cartella con il nome dell'anno:
+
+```bash
+python scrape_bur_fvg.py --convert-only --year 2021 --output bur_fvg
+```
+
+In alternativa indicare direttamente una sottocartella con `--output`.
+`--limit 10` converte soltanto i primi 10 PDF, in ordine di percorso.
+In questa modalita `--year` filtra le cartelle; `--dal` e `--al` non filtrano
+la conversione. Le opzioni di rete e `--legacy-pages` non sono usate.
+`--page` e `--solo-indice` sono incompatibili con `--convert-only`.
+
+Il report `conversione.csv` elenca PDF, TXT, pagine e stato (`ok`,
+`ocr_necessario`, `errore`) ed e aggiornato durante l'esecuzione. Gli indici
+dello scraping e `file_sources.json` non vengono riscritti; il report descrive
+la nuova conversione, mentre quei file conservano i metadati dello scraping.
+Un PDF privo di testo richiede OCR: non viene creato un TXT vuoto e un TXT
+preesistente resta intatto. Il codice di uscita e 2 se non ci sono PDF
+selezionati o se almeno un file richiede controllo; altrimenti e 0.
