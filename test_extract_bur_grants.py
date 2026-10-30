@@ -152,7 +152,6 @@ class Tests(unittest.TestCase):
             (source / 'cache').mkdir()
             base = source / '2026' / 'BUR_1_02_01_ordinario'
             base.with_suffix('.txt').write_text(
-                'PARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\n'
                 'Decreto del direttore n. 1\nBando per contributi alle imprese.', encoding='utf-8')
             base.with_suffix('.pdf').write_bytes(b'Not parsed: TXT is preferred')
             (source / 'fascicoli.json').write_text('{}')
@@ -181,7 +180,6 @@ class Tests(unittest.TestCase):
             source = root / 'BUR_fvg'
             source.mkdir()
             (source / 'sample.txt').write_text(
-                'PARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\n'
                 'Decreto del direttore n. 1\nBando per contributi alle imprese.\n'
                 'Decreto del direttore n. 2\nAvviso di concorso pubblico.\n'
                 'Deliberazione n. 3\nRipartizione del fondo di riserva.', encoding='utf-8')
@@ -199,57 +197,27 @@ class Tests(unittest.TestCase):
                 self.assertEqual(len(rows), 3 - expected)
                 self.assertTrue(all(row['source'] == 'sample.txt' for row in rows))
 
-    def test_section_layouts_from_ten_uploaded_summaries(self):
-        fixture = Path(__file__).parent / 'tests' / 'fixtures' / 'section_layouts.json'
-        cases = json.loads(fixture.read_text(encoding='utf-8'))
-        self.assertEqual(len(cases), 10)
-        for case in cases:
-            with self.subTest(source=case['name']):
-                text = case['text']
-                scope = e.regional_section(text)
-                self.assertEqual(scope is not None, case['section_found'])
-                for mode in ('strict', 'broad'):
-                    rows = list(e.scoped_candidates(text, mode=mode))
-                    self.assertEqual(len(rows), case['expected_candidates'])
-                    for row in rows:
-                        self.assertEqual(row['section'], 'parte_prima')
-                        self.assertEqual(row['text'], text[row['start']:row['end']])
-                        self.assertGreaterEqual(row['start'], scope[0])
-                        self.assertLessEqual(row['end'], scope[1])
-                        self.assertNotIn('Contributi statali', row['text'])
-                        self.assertNotIn('Contributi comunali', row['text'])
-                        self.assertNotIn('ripetuti nel testo integrale', row['text'])
-
-    def test_missing_or_wrong_regional_heading_fails_closed(self):
-        for prefix in ['', 'PARTE PRIMA\nALTRI ATTI\n',
-                       'PARTE SECONDA\nLEGGI DELLO STATO\n',
-                       'Il titolo cita PARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE.\n']:
-            text = prefix + 'Decreto n. 1. Contributi alle imprese.'
-            self.assertIsNone(e.regional_section(text))
-            self.assertEqual(list(e.scoped_candidates(text)), [])
-
-    def test_modern_repeated_summary_heading_keeps_continuation(self):
-        header = 'Sommario Parte Prima Leggi, regolamenti e atti della\nRegione\n'
-        text = header + 'Decreto n. 1. Contributi alle imprese.\npag. 1\n'
-        text += header + 'Decreto n. 2. Contributi alle famiglie.\npag. 2\n'
-        text += 'Sommario Parte Terza Concorsi e avvisi\nDecreto n. 3. Contributi comunali.'
-        self.assertEqual(len(list(e.scoped_candidates(text))), 2)
-
-    def test_cli_missing_section_does_not_contact_model(self):
+    def test_headingless_prefiltered_input_reaches_confirmation(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / 'BUR_fvg'
             source.mkdir()
-            (source / 'missing.txt').write_text('Decreto n. 1. Contributi alle imprese.')
+            text = 'Decreto del direttore n. 1. Contributi alle imprese.'
+            (source / 'regional.txt').write_text(text)
             output = Path(tmp) / 'results'
+            def mock_confirm(candidate, args):
+                return {**candidate, 'decision': 'uncertain', 'reason': 'mocked', 'references': []}
             with patch.object(sys, 'argv', ['extract_bur_grants.py', str(source), '--output', str(output)]), \
-                 patch.object(e, 'confirm', side_effect=AssertionError('Must not contact model')):
-                self.assertEqual(e.main(), 2)
-            inventory = [json.loads(line) for line in (output / 'inventory.jsonl').read_text().splitlines()]
-            self.assertEqual(inventory[0]['status'], 'section_not_found')
+                 patch.object(e, 'confirm', side_effect=mock_confirm) as confirm:
+                self.assertEqual(e.main(), 0)
+            self.assertEqual(confirm.call_count, 1)
+            row = json.loads((output / 'candidates.jsonl').read_text())
+            self.assertEqual(row['text'], text[row['start']:row['end']])
+            inventory = json.loads((output / 'inventory.jsonl').read_text())
+            self.assertEqual(inventory['status'], 'ok')
+            self.assertNotIn('section_start', inventory)
             summary = json.loads((output / 'filter_summary.json').read_text())
-            self.assertEqual(summary['section_not_found'], 1)
-            self.assertEqual(summary['candidates'], 0)
-            self.assertEqual((output / 'decisions.jsonl').read_text(), '')
+            self.assertEqual(summary['input_scope'], 'prefiltered_regional_text')
+            self.assertNotIn('section_not_found', summary)
 
     def test_pdf_reader_is_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -303,49 +271,18 @@ class Tests(unittest.TestCase):
 
 
 
-class ReflowedInputTests(unittest.TestCase):
-    def test_reflowed_layout_fixtures_keep_scoping_and_candidate_counts(self):
-        from scrape_bur_fvg import reflow_pdf_text
-        fixture = Path(__file__).parent / 'tests' / 'fixtures' / 'section_layouts.json'
-        for case in json.loads(fixture.read_text(encoding='utf-8')):
-            with self.subTest(source=case['name']):
-                text = reflow_pdf_text([case['text']])
-                scope = e.regional_section(text)
-                self.assertEqual(scope is not None, case['section_found'])
-                for mode in ('strict', 'broad'):
-                    rows = list(e.scoped_candidates(text, mode=mode))
-                    self.assertEqual(len(rows), case['expected_candidates'])
-                    for row in rows:
-                        self.assertEqual(row['text'], text[row['start']:row['end']])
-                        self.assertNotIn('Contributi comunali', row['text'])
-                        self.assertNotIn('Contributi statali', row['text'])
-
-    def test_continuous_entries_do_not_spill_into_following_notice(self):
-        text = ('Sommario Parte Prima Leggi, regolamenti e atti della Regione '
-                'Decreto del direttore n. 1. Contributi alle imprese. pag. 2 '
-                'Decreto del direttore n. 2. Assunzione personale. pag. 3 '
-                'Sommario Parte Terza Concorsi e avvisi Decreto n. 3. Contributi comunali.')
-        rows = list(e.scoped_candidates(text))
-        self.assertEqual(len(rows), 1)
-        self.assertNotIn('Assunzione', rows[0]['text'])
-        self.assertNotIn('comunali', rows[0]['text'])
-
-    def test_incidental_flat_heading_is_not_a_regional_section(self):
-        text = ('Il titolo cita PARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE. '
-                'Decreto n. 1. Contributi alle imprese.')
-        self.assertIsNone(e.regional_section(text))
-
-class SentenceParagraphInputTests(unittest.TestCase):
-    def test_inline_headers_with_sentence_breaks_keep_scoping(self):
-        text = ('Bollettino ufficiale Sommario Parte Prima Leggi, regolamenti e atti della Regione '
-                'Decreto n. 1. Contributi alle imprese.\npag. 2 '
-                'Decreto n. 2. Assunzione personale.\npag. 3 '
-                'Sommario Parte Terza Concorsi e avvisi Decreto n. 3. Contributi comunali.')
-        rows = list(e.scoped_candidates(text))
-        self.assertEqual(len(rows), 1)
-        self.assertNotIn('Assunzione', rows[0]['text'])
-        self.assertNotIn('comunali', rows[0]['text'])
-        self.assertEqual(rows[0]['text'], text[rows[0]['start']:rows[0]['end']])
+class PrefilteredLayoutTests(unittest.TestCase):
+    def test_prefiltered_multiline_continuous_and_sentence_layouts(self):
+        entry1 = 'Decreto del direttore n. 1. Contributi alle imprese. pag. 2'
+        entry2 = 'Decreto del direttore n. 2. Assunzione personale. pag. 3'
+        for separator in ['\n', ' ', '\n\n']:
+            with self.subTest(separator=separator):
+                text = entry1 + separator + entry2
+                for mode in ['strict', 'broad']:
+                    rows = list(e.candidates(text, mode=mode))
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]['text'], text[rows[0]['start']:rows[0]['end']])
+                    if mode == 'strict':
+                        self.assertNotIn('Assunzione', rows[0]['text'])
 
 if __name__ == '__main__': unittest.main()
-

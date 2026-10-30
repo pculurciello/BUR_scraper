@@ -418,27 +418,21 @@ La selezione più stretta può perdere voci dal titolo generico: dettagli e limi
 nella [guida all'estrazione](docs/GRANT_EXTRACTION.md#filtro-più-selettivo-e-confronto-con-il-precedente).
 
 
-## Solo atti della Regione: Parte Prima
+## Estrazione contributi da TXT già filtrati
 
-L'estrattore esamina esclusivamente **PARTE PRIMA — LEGGI, REGOLAMENTI E ATTI
-DELLA REGIONE**, sia nei sommari storici sia nel formato moderno `Sommario Parte
-Prima`. Parti Seconda/Terza e successivi testi integrali sono esclusi. Il vincolo
-vale anche in modalità `broad`. Il modello verifica inoltre che la misura sia
-promossa dalla Regione, distinguendo il promotore dai beneficiari.
-
-Il comando resta:
+`extract_bur_grants.py` assume che i TXT siano già limitati alla Parte Prima
+regionale. Legge direttamente l'intero testo fornito, senza cercare o richiedere
+l'intestazione e senza eseguire di nuovo il ritaglio. Anche i file senza titolo
+vengono elaborati normalmente; resta la verifica semantica del promotore regionale.
 
 ```bash
 python extract_bur_grants.py BUR_fvg --output results --candidates-only
+python extract_bur_grants.py BUR_fvg --output results
 ```
 
-Controllare `inventory.jsonl`: `section_not_found` significa zero invii al modello
-per quel file e codice di uscita 2, per revisione. Nei dieci TXT di prova, nove
-hanno un titolo regionale riconosciuto; il supplemento storico senza titolo è
-escluso. I filtri combinati selezionano 9 candidati contro i 55 del filtro ampio
-originale sull'intero testo. Risultati e limiti nella
-[guida all'estrazione](docs/GRANT_EXTRACTION.md#selezione-obbligatoria-della-parte-prima).
-
+Se si parte dai TXT grezzi dello scraper, la preparazione può essere eseguita
+separatamente con `extract_bur_part_one.py`. Dettagli nella
+[guida all'estrazione](docs/GRANT_EXTRACTION.md#input-già-filtrato-nessuna-verifica-della-sezione).
 
 
 ## Conversione PDF → TXT: frasi e a capo

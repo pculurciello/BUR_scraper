@@ -73,85 +73,9 @@ def grant_reason(text, mode='strict'):
     return None
 
 
-# Anchored headings, rather than incidental mentions in titles or prose.
-PART_HEADER = re.compile(
-    r'^[ \t]*(?P<summary>Sommario[ \t]+)?PARTE\s+'
-    r'(?P<part>PRIMA|SECONDA|TERZA|QUARTA)\b', re.I | re.M)
-REGIONAL_HEADER = re.compile(
-    r'^[ \t]*(?:Sommario[ \t]+)?PARTE\s+PRIMA\s+'
-    r'LEGGI\s*,\s*REGOLAMENTI\s*,?\s*E\s+ATTI\s+DELLA\s+REGIONE\b',
-    re.I | re.M)
-
-
-# Reflowed TXT may put headings inside paragraphs. Explicit summary headings
-# (or all-caps legacy headings after a BUR preamble) remain recognizable.
-FLAT_PART_HEADER = re.compile(
-    r'(?:(?P<summary>(?i:Sommario)\s+)(?i:PARTE)|PARTE)\s+'
-    r'(?P<part>(?i:PRIMA|SECONDA|TERZA|QUARTA))\b')
-FLAT_REGIONAL_HEADER = re.compile(REGIONAL_HEADER.pattern.removeprefix(r'^[ \t]*'), re.I)
+# Reflowed TXT can contain page locators inside continuous paragraphs.
 FLAT_ENTRY_END = re.compile(
     r'(?<!\w)pag(?:ina)?\.?[ \t]*\d+(?:[ \t]*[-–,][ \t]*\d+)*(?=\s|$)', re.I)
-
-
-def flat_regional_section(text):
-    first = FLAT_PART_HEADER.search(text)
-    if not first or first['part'].upper() != 'PRIMA':
-        return None
-    # Avoid treating an incidental citation inside prose as a section header.
-    prefix = text[:first.start()].strip()
-    if prefix and not first['summary'] and not re.search(r'\bbollettino\b', prefix, re.I):
-        return None
-    title = FLAT_REGIONAL_HEADER.match(text, first.start())
-    if not title:
-        return None
-    end = len(text)
-    for following in FLAT_PART_HEADER.finditer(text, title.end()):
-        if following['part'].upper() == 'PRIMA' and following['summary']:
-            continue
-        end = following.start()
-        break
-    return title.end(), end
-
-
-def regional_section(text):
-    """Return one summary's Part One body offsets, or None (fail closed).
-
-    Later Part One headings in legacy fallback PDFs belong to the full acts,
-    not a reason to resume after the summary's Parts Two/Three.
-    """
-    inline_headers = any(text[text.rfind('\n', 0, m.start()) + 1:m.start()].strip()
-                         for m in FLAT_PART_HEADER.finditer(text))
-    if ('\n' not in text and '\r' not in text) or inline_headers:
-        return flat_regional_section(text)
-    first = PART_HEADER.search(text)
-    if not first or first['part'].upper() != 'PRIMA':
-        return None
-    title = REGIONAL_HEADER.match(text, first.start())
-    if not title:
-        return None
-    end = len(text)
-    for following in PART_HEADER.finditer(text, title.end()):
-        # Modern summaries can repeat their heading on continuation pages.
-        if following['part'].upper() == 'PRIMA' and following['summary']:
-            continue
-        end = following.start()
-        break
-    return title.end(), end
-
-
-def scoped_candidates(text, mode='strict', rejected=None):
-    """Yield candidates in Part One only, with document-relative offsets."""
-    scope = regional_section(text)
-    if scope is None:
-        return
-    start, end = scope
-    local_rejected = [] if rejected is not None else None
-    for row in candidates(text[start:end], mode=mode, rejected=local_rejected):
-        yield {**row, 'start': row['start'] + start, 'end': row['end'] + start,
-               'section': 'parte_prima'}
-    if rejected is not None:
-        rejected.extend({**row, 'start': row['start'] + start, 'end': row['end'] + start,
-                         'section': 'parte_prima'} for row in local_rejected)
 
 
 KINDS = ['law', 'presidential_decree', 'directors_decree', 'deliberation']
@@ -289,8 +213,8 @@ def confirm(candidate, args):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('input', type=Path)
+    parser = argparse.ArgumentParser(description='Extract grants from already-filtered regional TXT; no section check.')
+    parser.add_argument('input', type=Path, help='Directory of TXT files already limited to regional Part One')
     parser.add_argument('--output', type=Path, default=Path('bur_grants_output'))
     parser.add_argument('--base-url', default=os.getenv('VLLM_BASE_URL', 'http://localhost:8000/v1'))
     parser.add_argument('--model', default=os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-32B-Instruct'))
@@ -308,8 +232,6 @@ def main():
     pending, failures = [], False
     rejected_counts = Counter()
     broad_total = 0
-    whole_document_broad_total = 0
-    missing_sections = 0
     with (args.output / 'inventory.jsonl').open('w', encoding='utf-8') as inventory, \
          (args.output / 'rejected.jsonl').open('w', encoding='utf-8') as rejection_log:
         for path in sorted(args.input.rglob('*')):
@@ -329,32 +251,18 @@ def main():
                 text = read(path).replace('\r\n', '\n').replace('\u00ad', '').replace('\xa0', ' ')
                 if not text.strip():
                     raise ValueError('Empty TXT file: regenerate the bulletin text before extraction')
-                whole_broad = sum(1 for _ in candidates(text, mode='broad'))
-                whole_document_broad_total += whole_broad
-                scope = regional_section(text)
-                if scope is None:
-                    missing_sections += 1
-                    failures = True
-                    record.update(status='section_not_found', characters=len(text), candidates=0,
-                                  whole_document_broad_candidates=whole_broad,
-                                  reason='Required PARTE PRIMA regional heading not found; no text sent to model')
-                    inventory.write(json.dumps(record, ensure_ascii=False) + '\n')
-                    continue
                 rejected = []
                 items = [{**c, 'source': source} for c in
-                         scoped_candidates(text, mode=args.filter_mode, rejected=rejected)]
+                         candidates(text, mode=args.filter_mode, rejected=rejected)]
                 broad_count = (len(items) if args.filter_mode == 'broad' else
-                               sum(1 for _ in scoped_candidates(text, mode='broad')))
+                               sum(1 for _ in candidates(text, mode='broad')))
                 broad_total += broad_count
                 for item in rejected:
                     rejected_counts[item['reason']] += 1
                     rejection_log.write(json.dumps({**item, 'source': source}, ensure_ascii=False) + '\n')
                 pending.extend(items)
                 record.update(status='ok', characters=len(text), candidates=len(items),
-                              broad_candidates=broad_count, filter_mode=args.filter_mode,
-                              whole_document_broad_candidates=whole_broad, section='parte_prima',
-                              section_start=scope[0], section_end=scope[1],
-                              excluded_characters=len(text) - (scope[1] - scope[0]))
+                              broad_candidates=broad_count, filter_mode=args.filter_mode)
             except Exception as exc:
                 record.update(status='read_error', error=str(exc))
                 failures = True
@@ -364,13 +272,10 @@ def main():
             handle.write(json.dumps(candidate, ensure_ascii=False) + '\n')
     summary = {'filter_mode': args.filter_mode, 'candidates': len(pending),
                'broad_candidates': broad_total, 'rejected_reasons': dict(rejected_counts),
-               'section_scope': 'parte_prima', 'section_not_found': missing_sections,
-               'whole_document_broad_candidates': whole_document_broad_total}
+               'input_scope': 'prefiltered_regional_text'}
     (args.output / 'filter_summary.json').write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(f'{len(pending)} candidates in PARTE PRIMA (broad in section: {broad_total}; '
-          f'broad in whole documents: {whole_document_broad_total}; '
-          f'missing section: {missing_sections})', flush=True)
+    print(f'{len(pending)} candidates (broad filter on supplied TXT: {broad_total})', flush=True)
     if not args.candidates_only:
         with futures.ThreadPoolExecutor(max_workers=args.workers) as pool, \
              (args.output / 'decisions.jsonl').open('w', encoding='utf-8') as audit, \
