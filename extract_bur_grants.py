@@ -4,7 +4,6 @@ See docs/GRANT_EXTRACTION.md for setup, model configuration and limitations.
 """
 import argparse
 import concurrent.futures as futures
-from collections import Counter
 import hashlib
 import json
 import os
@@ -13,69 +12,76 @@ import re
 import time
 import urllib.request
 
-ACT = r'(?:legg[ei](?:\s+regional[ei])?|l\s*\.\s*r\s*\.|decret[oi]|d\s*\.\s*p\s*\.?\s*r\s*\.?|d\s*\.\s*d\s*\.?|deliberazion[ei]|deliber[ae]|d\s*\.\s*g\s*\.?\s*r\s*\.?)'
-ACT_RE = re.compile(r'\b' + ACT, re.I)
-HEAD = re.compile(r'^\s*(?:\d+\s*[-|:]?\s*)?' + ACT, re.I | re.M)
-BROAD_GRANT = re.compile(r'\b(?:contribut\w*|sovvenzion\w*|finanziament\w*|agevolazion\w*|incentiv\w*|aiut[oi]|sussidi\w*|voucher|ristor\w*|bors[ae]\s+di\s+studio|band[oi]|avvis[oi]|fond[oi]|sostegn\w*)\b', re.I)
-# Summary page locators end a voice, preventing spillover into later notices.
-ENTRY_END = re.compile(r'^[ \t]*pag(?:ina)?\.?[ \t]*\d+(?:[ \t]*[-–,][ \t]*\d+)*[ \t]*(?:\n|$)', re.I | re.M)
-# Explicit monetary instruments. Generic notices/funds are not grant evidence.
-GRANT = re.compile(
-    r'\b(?:contribut[oi]|sovvenzion[ei]|sussidi[oi]|voucher|ristor[oi]|'
-    r'bors[ae]\s+di\s+studio|aiut[oi]\s+(?:di\s+stato|alle?\s+imprese)|'
-    r'de\s+minimis|finanziament[oi]\s+(?:agevolat[oi]|a\s+fondo\s+perduto)|'
-    r'agevolazion[ei]\s+(?:finanziari[ae]|fiscali)|'
-    r'incentivi\s+(?:economici|finanziari))\b', re.I)
-WEAK_GRANT = re.compile(
-    r'\b(?:finanziament[oi]|agevolazion[ei]|incentiv[oi]|sostegno)\b', re.I)
-BENEFICIARY = re.compile(
-    r'\b(?:imprese|imprenditor\w*|aziende|associazioni|famiglie|cittadini|'
-    r'student\w*|beneficiari\w*|agricoltor\w*|cooperative|comuni|enti\s+locali|'
-    r'organizzazioni|soggetti\s+(?:pubblici|privati)|disoccupati|giovani|'
-    r'enti\s+del\s+terzo\s+settore)\b', re.I)
-PROCEDURE = re.compile(
-    r'\b(?:band[oi]|avvis[oi]|concession[ei]|erogazion[ei]|assegnazion[ei]|'
-    r'liquidazion[ei]|approvazion[ei]|graduatori[ae]|domand[ae]|criteri|regolament\w*|'
-    r'beneficiari\w*|prorog\w*|revoc\w*|ripart\w*|termini|modalit[àa])\b', re.I)
-# Remove only specific non-grant meanings, never all uses of "contributi".
-NON_GRANT = re.compile(
-    r'\bcontribut[oi]\s+(?:(?:di|per)\s+(?:gara|partecipazione\s+alla\s+gara)|'
-    r'(?:a\s+favore\s+(?:di|dell[\'’])\s*)?(?:ANAC|AVCP)|'
-    r'unificat[oi]|previdenzial\w*|pensionistic\w*|'
-    r'assicurativ\w*|obbligator\w*|consortil\w*|di\s+bonifica|'
-    r'(?:scientific[oi]|teoric[oi])|all[\'’]?(?:a\s+)?(?:conoscenza|analisi|discussione))\b', re.I)
-NON_GRANT_CONTEXT = re.compile(
-    r'\b(?:appalt\w*|affidament\w*|aggiudicazion\w*|gara\s+d[\'’]appalto|'
-    r'assunzion\w*|reclutament\w*|concorso\s+pubblico|'
-    r'incaric\w*\s+professional\w*)\b', re.I)
+# The ONLY selection criterion is the standalone word "bando", any case.
+BANDO = re.compile(r'\bbando\b', re.I)
+PAGE = re.compile(r'(?<!\w)pag(?:ina)?\.?\s*(?P<number>\d+)(?:\s*[-–,]\s*\d+)*(?=\s|$)', re.I)
+MONTHS = (r'gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|'
+          r'settembre|ottobre|novembre|dicembre')
+ACT_TYPE = (r'Deliberazione(?:\s+della\s+Giunta(?:\s+regionale)?)?|'
+            r'Decreto|Legge(?:\s+regionale)?|D\s*\.\s*G\s*\.\s*R\s*\.|'
+            r'D\s*\.\s*P\s*\.\s*(?:G\s*\.\s*)?R\s*\.|D\s*\.\s*D\s*\.')
+DATE = rf'(?:\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}}|\d{{1,2}}[./]\d{{1,2}}[./]\d{{4}})'
+NUMBER = r'\d+(?:\s*[-/]\s*[\w]+)*'
+ACT_CITATION = re.compile(
+    rf'\b(?:{ACT_TYPE})[^;!?]{{0,260}}?\b{DATE}\s*,?\s*n[.°º]?\s*{NUMBER}', re.I)
+# Incomplete citations are preserved as written rather than inventing dates.
+SHORT_CITATION = re.compile(
+    rf'\b(?:{ACT_TYPE})[^;!?]{{0,180}}?\bn[.°º]\s*{NUMBER}', re.I)
+SENTENCE_END = re.compile(r'[.!?](?:["”»])?\s+(?=[A-ZÀ-ÖØ-Þ])')
 
 
-def grant_reason(text, mode='strict'):
-    """Return an auditable acceptance rule; None means no grant evidence.
+def compact(text):
+    return ' '.join(text.split())
 
-    Work on a whitespace-folded copy only: offsets and LLM evidence remain
-    anchored to the original normalized TXT, including its line breaks.
+
+def entry_spans(text):
+    """Use page locators and act headings to separate summary entries."""
+    boundaries = {0, len(text)}
+    for page in PAGE.finditer(text):
+        boundaries.update((page.start(), page.end()))
+    for match in ACT_CITATION.finditer(text):
+        line_prefix = text[text.rfind('\n', 0, match.start()) + 1:match.start()]
+        preceding = text[:match.start()].rstrip()
+        if (not line_prefix.strip() or not preceding
+                or (preceding[-1:] in '.!?' and text[match.start()].isupper())):
+            boundaries.add(match.start())
+    boundaries = sorted(boundaries)
+    for start, end in zip(boundaries, boundaries[1:]):
+        if text[start:end].strip() and not PAGE.fullmatch(text[start:end].strip()):
+            yield start, end
+
+
+def candidates(text):
+    """One record per summary entry containing bando, regardless of its topic.
+
+    Keep the sentence containing bando and its following closing sentences.
+    Missing act citations do not exclude a match: act is null and can be reviewed.
     """
-    if mode == 'broad':
-        return 'legacy_keyword' if BROAD_GRANT.search(text) else None
-    folded = ' '.join(text.split())
-    cleaned = NON_GRANT.sub(' ', folded)
-    if GRANT.search(cleaned):
-        return 'explicit_grant_instrument'
-    # Weak financial language needs both procedure and recipient context nearby.
-    # Procurement/recruitment is excluded only on this weaker route; a real
-    # explicit grant in a mixed entry still survives for semantic confirmation.
-    for match in WEAK_GRANT.finditer(cleaned):
-        context = cleaned[max(0, match.start() - 200):match.end() + 200]
-        if (PROCEDURE.search(context) and BENEFICIARY.search(context)
-                and not NON_GRANT_CONTEXT.search(context)):
-            return 'financial_measure_with_procedure_and_beneficiary'
-    return None
-
-
-# Reflowed TXT can contain page locators inside continuous paragraphs.
-FLAT_ENTRY_END = re.compile(
-    r'(?<!\w)pag(?:ina)?\.?[ \t]*\d+(?:[ \t]*[-–,][ \t]*\d+)*(?=\s|$)', re.I)
+    pages = list(PAGE.finditer(text))
+    for start, end in entry_spans(text):
+        entry = text[start:end]
+        keyword = BANDO.search(entry)
+        if not keyword:
+            continue
+        prefix = entry[:keyword.start()]
+        citation = ACT_CITATION.search(prefix) or SHORT_CITATION.search(prefix)
+        act = compact(citation.group()).rstrip(' .') if citation else None
+        description_start = citation.end() if citation else 0
+        # Skip the legal basis preceding the sentence with bando. Do not split
+        # within dates, n., art., LR references, or abbreviations in that sentence.
+        for boundary in SENTENCE_END.finditer(entry, description_start, keyword.start() + 1):
+            description_start = boundary.end()
+        while description_start < len(entry) and entry[description_start].isspace():
+            description_start += 1
+        description_end = len(entry.rstrip())
+        raw = entry[description_start:description_end]
+        if not BANDO.search(raw):
+            continue
+        yield {'text': compact(raw), 'act': act,
+               'start': start + description_start, 'end': start + description_end,
+               'raw_text': raw,
+               'page_before': next((p['number'] for p in reversed(pages) if p.end() <= start), None),
+               'page_after': next((p['number'] for p in pages if p.start() >= end), None)}
 
 
 KINDS = ['law', 'presidential_decree', 'directors_decree', 'deliberation']
@@ -122,43 +128,6 @@ def read(path):
     return text
 
 
-def candidates(text, size=10000, overlap=1500, mode='strict', rejected=None):
-    if not 0 <= overlap < size:
-        raise ValueError('Require 0 <= overlap < size')
-    if mode not in ('strict', 'broad'):
-        raise ValueError('Unknown filter mode')
-    boundaries = {0, len(text), *(m.start() for m in HEAD.finditer(text))}
-    locators = list(FLAT_ENTRY_END.finditer(text))
-    inline_locators = any(ENTRY_END.match(text, m.start()) is None for m in locators)
-    if ('\n' not in text and '\r' not in text) or (mode == 'strict' and inline_locators):
-        # Page locators separate summary entries even when layout line breaks
-        # have been removed. Keep offsets in the original continuous TXT.
-        boundaries.update(m.end() for m in FLAT_ENTRY_END.finditer(text))
-    elif mode == 'strict':
-        boundaries.update(m.end() for m in ENTRY_END.finditer(text))
-    boundaries = sorted(boundaries)
-    for start, end in zip(boundaries, boundaries[1:]):
-        entry = text[start:end]
-        reason = grant_reason(entry, mode) if ACT_RE.search(entry) else None
-        if not reason:
-            if rejected is not None:
-                rejected.append({'start': start, 'end': end, 'text': entry,
-                                 'reason': 'no_act_reference' if not ACT_RE.search(entry)
-                                           else 'no_grant_evidence'})
-            continue
-        for offset in range(0, len(entry), size - overlap):
-            chunk = entry[offset:offset + size]
-            chunk_reason = grant_reason(chunk, mode)
-            if mode == 'broad' or chunk_reason:
-                yield {'start': start + offset, 'end': start + offset + len(chunk),
-                       'text': chunk, 'filter_reason': chunk_reason or reason}
-            elif rejected is not None:
-                rejected.append({'start': start + offset, 'end': start + offset + len(chunk),
-                                 'text': chunk, 'reason': 'no_grant_evidence_in_window'})
-            if offset + size >= len(entry):
-                break
-
-
 def validate(obj, text):
     if set(obj) != {'decision', 'reason', 'references'}:
         raise ValueError('Invalid response keys')
@@ -180,16 +149,17 @@ def validate(obj, text):
 
 
 def confirm(candidate, args):
+    context = ((candidate.get('act') or '') + '\n' + candidate['text']).strip()
     payload = {'model': args.model, 'temperature': 0, 'max_tokens': 4096,
                'messages': [{'role': 'system', 'content': PROMPT},
-                            {'role': 'user', 'content': candidate['text']}],
+                            {'role': 'user', 'content': context}],
                'response_format': {'type': 'json_schema', 'json_schema': {
                    'name': 'grants', 'strict': True, 'schema': SCHEMA}}}
     key = hashlib.sha256(json.dumps([args.base_url, payload], sort_keys=True).encode()).hexdigest()
     cache = args.output / 'cache' / (key + '.json')
     if cache.exists():
         try:
-            return {**candidate, **validate(json.loads(cache.read_text()), candidate['text'])}
+            return {**candidate, **validate(json.loads(cache.read_text()), context)}
         except (ValueError, TypeError):
             pass
     error = ''
@@ -202,7 +172,7 @@ def confirm(candidate, args):
                 choice = json.load(response)['choices'][0]
             if choice.get('finish_reason') != 'stop':
                 raise ValueError('Truncated or incomplete model response')
-            result = validate(json.loads(choice['message']['content']), candidate['text'])
+            result = validate(json.loads(choice['message']['content']), context)
             cache.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
             return {**candidate, **result}
         except Exception as exc:
@@ -213,15 +183,14 @@ def confirm(candidate, args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Extract grants from already-filtered regional TXT; no section check.')
+    parser = argparse.ArgumentParser(description='Extract entries containing bando from prefiltered regional TXT; optional vLLM confirmation.')
     parser.add_argument('input', type=Path, help='Directory of TXT files already limited to regional Part One')
     parser.add_argument('--output', type=Path, default=Path('bur_grants_output'))
     parser.add_argument('--base-url', default=os.getenv('VLLM_BASE_URL', 'http://localhost:8000/v1'))
     parser.add_argument('--model', default=os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-32B-Instruct'))
     parser.add_argument('--workers', type=int, default=4)
-    parser.add_argument('--candidates-only', action='store_true')
-    parser.add_argument('--filter-mode', choices=['strict', 'broad'], default='strict',
-                        help='strict: grant-specific evidence; broad: original high-recall keywords')
+    parser.add_argument('--candidates-only', action='store_true',
+                        help='Write candidates.json and its JSONL audit without calling vLLM')
     args = parser.parse_args()
     if not args.input.is_dir() or args.workers < 1:
         parser.error('Input must be an existing directory; workers must be positive')
@@ -230,10 +199,7 @@ def main():
         parser.error('Input and output must differ')
     (args.output / 'cache').mkdir(parents=True, exist_ok=True)
     pending, failures = [], False
-    rejected_counts = Counter()
-    broad_total = 0
-    with (args.output / 'inventory.jsonl').open('w', encoding='utf-8') as inventory, \
-         (args.output / 'rejected.jsonl').open('w', encoding='utf-8') as rejection_log:
+    with (args.output / 'inventory.jsonl').open('w', encoding='utf-8') as inventory:
         for path in sorted(args.input.rglob('*')):
             if (not path.is_file() or args.output in path.parents
                     or any(part in {'cache', '.git', '__pycache__'}
@@ -251,18 +217,9 @@ def main():
                 text = read(path).replace('\r\n', '\n').replace('\u00ad', '').replace('\xa0', ' ')
                 if not text.strip():
                     raise ValueError('Empty TXT file: regenerate the bulletin text before extraction')
-                rejected = []
-                items = [{**c, 'source': source} for c in
-                         candidates(text, mode=args.filter_mode, rejected=rejected)]
-                broad_count = (len(items) if args.filter_mode == 'broad' else
-                               sum(1 for _ in candidates(text, mode='broad')))
-                broad_total += broad_count
-                for item in rejected:
-                    rejected_counts[item['reason']] += 1
-                    rejection_log.write(json.dumps({**item, 'source': source}, ensure_ascii=False) + '\n')
+                items = [{**c, 'source': source} for c in candidates(text)]
                 pending.extend(items)
-                record.update(status='ok', characters=len(text), candidates=len(items),
-                              broad_candidates=broad_count, filter_mode=args.filter_mode)
+                record.update(status='ok', characters=len(text), candidates=len(items))
             except Exception as exc:
                 record.update(status='read_error', error=str(exc))
                 failures = True
@@ -270,12 +227,10 @@ def main():
     with (args.output / 'candidates.jsonl').open('w', encoding='utf-8') as handle:
         for candidate in pending:
             handle.write(json.dumps(candidate, ensure_ascii=False) + '\n')
-    summary = {'filter_mode': args.filter_mode, 'candidates': len(pending),
-               'broad_candidates': broad_total, 'rejected_reasons': dict(rejected_counts),
-               'input_scope': 'prefiltered_regional_text'}
-    (args.output / 'filter_summary.json').write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(f'{len(pending)} candidates (broad filter on supplied TXT: {broad_total})', flush=True)
+    (args.output / 'candidates.json').write_text(
+        json.dumps([{'text': c['text'], 'act': c['act']} for c in pending],
+                   ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    print(f'{len(pending)} entries containing bando', flush=True)
     if not args.candidates_only:
         with futures.ThreadPoolExecutor(max_workers=args.workers) as pool, \
              (args.output / 'decisions.jsonl').open('w', encoding='utf-8') as audit, \

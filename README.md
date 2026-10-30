@@ -399,24 +399,26 @@ La validazione riguarda solo le pagine dei risultati dell'archivio: la home
 e le pagine di dettaglio non richiedono lo stesso tipo di link.
 
 
-## Ridurre i candidati prima della conferma vLLM
+## Estrazione semplice delle voci con «bando»
 
-L'estrattore usa ora il filtro `strict`: non seleziona più una voce per la sola
-presenza di parole generiche come bando, avviso o fondi. Richiede strumenti
-contributivi espliciti o una combinazione vicina di misura finanziaria, procedura
-e beneficiari; neutralizza contributi obbligatori/previdenziali e riduce le
-finestre senza indizi contributivi.
+Il primo stadio di `extract_bur_grants.py` cerca soltanto la parola intera
+**bando**, senza distinzione tra maiuscole e minuscole. Le precedenti regole
+strict/broad sono state rimosse. Ogni voce produce in `candidates.json`:
+
+```json
+{"text": "Bando per contributi alle imprese. Adozione.", "act": "Deliberazione della Giunta regionale 6 febbraio 2026, n. 143"}
+```
+
+L'output è un array JSON; `candidates.jsonl` aggiunge fonte, offset e contesto
+dei riferimenti di pagina. La descrizione conserva frasi conclusive come
+«Adozione.» e la citazione dell'atto è separata dalle norme richiamate.
 
 ```bash
 python extract_bur_grants.py BUR_fvg --output results --candidates-only
 ```
 
-Il comando confronta il numero selezionato con quello del filtro originale.
-Controllare `filter_summary.json` e un campione di `rejected.jsonl` prima di
-avviare il modello. `--filter-mode broad` ripristina il filtro precedente.
-La selezione più stretta può perdere voci dal titolo generico: dettagli e limiti
-nella [guida all'estrazione](docs/GRANT_EXTRACTION.md#filtro-più-selettivo-e-confronto-con-il-precedente).
-
+Questo comando non richiede vLLM. Omettere `--candidates-only` per la conferma
+semantica opzionale. Schema e limiti nella [guida](docs/GRANT_EXTRACTION.md).
 
 ## Estrazione contributi da TXT già filtrati
 
