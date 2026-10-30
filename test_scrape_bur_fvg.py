@@ -491,7 +491,7 @@ class PdfTextReflowTests(unittest.TestCase):
                                    'FRIULI-\nVENEZIA. COVID-\n19. 1998-\n2003. '
                                    'Titolo -\n nota.'])
         self.assertEqual(text, 'socioeconomico e tecnico-scientifico. FRIULIVENEZIA. '
-                              'COVID19. 19982003. Titolo nota.')
+                              'COVID19. 19982003. Titolonota.')
 
     def test_empty_pages_remain_empty(self):
         self.assertEqual(bur.reflow_pdf_text(['', '  \n\t', '']), '')
@@ -649,7 +649,31 @@ class SentenceBoundaryReflowTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertEqual(bur.reflow_pdf_text([raw]), expected)
 
+class HyphenWhitespaceRegressionTests(unittest.TestCase):
+    def test_long_fragments_do_not_keep_a_space(self):
+        cases = [('contri -\n buti', 'contributi'),
+                 ('finanzia - \n menti', 'finanziamenti'),
+                 ('contribu- \n  zioni', 'contribuzioni')]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(bur.reflow_pdf_text([raw]), expected)
+
+    def test_unicode_spaces_around_wrapped_hyphen_are_removed(self):
+        for space in ['\u00a0', '\u2003', '\u202f', '\t']:
+            with self.subTest(space=repr(space)):
+                self.assertEqual(bur.reflow_pdf_text(['contri'+space+'-'+space+'\n'+space+'buti']),
+                                 'contributi')
+
+    def test_hyphen_across_pages_joins_indented_fragments(self):
+        self.assertEqual(bur.reflow_pdf_text(['Le risorse finanzia -  ', '\u00a0menti.\nNuova frase.']),
+                         'Le risorse finanziamenti.\nNuova frase.')
+
+    def test_windows_line_endings_and_inline_hyphens(self):
+        self.assertEqual(bur.reflow_pdf_text(['contribu - \r\n  zioni tecnico-scientifiche.']),
+                         'contribuzioni tecnico-scientifiche.')
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
