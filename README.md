@@ -452,7 +452,11 @@ una fine di frase. Il riconoscimento resta euristico nei casi ambigui.
 Non vengono aggiunti separatori artificiali `--- Pagina N ---`.
 
 Ogni trattino `-` a fine riga, anche seguito da spazi prima dell'a capo,
-viene eliminato assieme all'a capo. Si applica la stessa regola ai trattini
+viene eliminato assieme all'a capo e a tutti gli spazi circostanti, inclusi
+spazi non separabili Unicode e indentazione della riga successiva. Le due
+parti della parola sono unite senza separatori, indipendentemente dalla
+lunghezza: `finanzia -` + a capo + ` menti` diventa `finanziamenti`.
+Si applica la stessa regola ai trattini
 tipografici di sillabazione. La regola vale senza eccezioni: anche
 `socio-` + a capo + `economico` diventa `socioeconomico` e `1998-` + a capo +
 `2003` diventa `19982003`. I trattini interni a una riga sono conservati.
@@ -500,4 +504,5 @@ la nuova conversione, mentre quei file conservano i metadati dello scraping.
 Un PDF privo di testo richiede OCR: non viene creato un TXT vuoto e un TXT
 preesistente resta intatto. Il codice di uscita e 2 se non ci sono PDF
 selezionati o se almeno un file richiede controllo; altrimenti e 0.
+
 
