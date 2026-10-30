@@ -506,3 +506,64 @@ preesistente resta intatto. Il codice di uscita e 2 se non ci sono PDF
 selezionati o se almeno un file richiede controllo; altrimenti e 0.
 
 
+
+
+
+## Estrarre soltanto il Sommario Parte Prima in un'altra directory
+
+Lo script separato `extract_bur_part_one.py` legge i TXT gia esistenti e salva
+soltanto la sezione **SOMMARIO PARTE PRIMA — LEGGI, REGOLAMENTI E ATTI DELLA
+REGIONE**, mantenendo nomi e sottocartelle delle annualita:
+
+```bash
+python extract_bur_part_one.py bur_fvg --output bur_parte_prima
+```
+
+Esempio: `bur_fvg/2021/BUR_49_09_12_ordinario.txt` produce
+`bur_parte_prima/2021/BUR_49_09_12_ordinario.txt`. I TXT sorgenti non vengono
+modificati. Lo script usa soltanto la libreria standard di Python 3.10+, senza
+rete, PDF, OCR o modelli. Accetta sia gli a capo originali sia i TXT ripuliti.
+
+Per una sola annualita o un singolo file:
+
+```bash
+python extract_bur_part_one.py bur_fvg --year 2000 --output bur_parte_prima
+python extract_bur_part_one.py bur_fvg/1999/BUR_legacy_5_18_ordinario.txt --output bur_parte_prima
+```
+
+### Esclusione del testo integrale, anche per il 1999–2000
+
+L'estrazione parte solo da un'intestazione esplicita del **sommario regionale**.
+Si ferma alla parte successiva del sommario o alla nuova intestazione
+**PARTE PRIMA** che introduce i testi integrali. Riconosce inoltre alcune
+formule tipiche del corpo degli atti, come “IL CONSIGLIO REGIONALE HA APPROVATO”
+e “IL PRESIDENTE … PROMULGA”. L'output termina all'ultimo riferimento `pag. N`
+precedente al confine individuato. Non riprende l'estrazione nelle parti successive.
+
+Sono conservate le intestazioni del sommario ripetute sulle pagine di
+continuazione. L'intestazione iniziale dell'output viene uniformata, mentre
+il corpo selezionato mantiene il testo del TXT di origine. Le ripetizioni di
+intestazioni o pie di pagina gia nel corpo non vengono corrette automaticamente.
+
+Se mancano l'intestazione, i riferimenti di pagina o un confine sufficientemente
+riconoscibile, il file viene segnalato invece di includere potenzialmente
+il testo integrale. I confini sono riconosciuti con regole testuali, non con
+una comprensione semantica: controllare il report, soprattutto per layout insoliti.
+
+`estrazione_sezioni.csv` e `estrazione_sezioni.json` riportano per ogni sorgente
+il risultato: `ok`, `section_not_found`, `no_summary_entries`, `ambiguous_end`
+o `error`, gli offset del testo selezionato e il motivo del confine.
+`voci` conta i riferimenti di pagina rilevati ed e indicativo.
+Un file senza sezione valida non genera un nuovo TXT; un suo eventuale output
+precedente e preservato e segnalato nel report. Il codice di uscita e 2 se ci
+sono file da controllare o nessun TXT selezionato, altrimenti 0.
+
+`--limit 10` limita la prova ai primi dieci TXT. Le cartelle `cache` e
+`diagnostics` sono escluse; un'eventuale directory di output annidata
+nell'input e esclusa dalla scansione. L'output non puo coincidere con la
+directory dei sorgenti o con una sua directory antenata, per evitare di
+sovrascrivere i file originali. I report descrivono solo l'esecuzione corrente.
+
+```bash
+python -m unittest -v test_extract_bur_part_one.py
+```
