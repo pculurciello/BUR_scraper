@@ -335,9 +335,9 @@ fonti, decisioni incerte e errori per revisione.
 
 ```bash
 python -m pip install -r requirements-extraction.txt
-python extract_bur_grants.py bur_fvg --output results --candidates-only
+python extract_bur_grants.py bur_parte_prima --output results --candidates-only
 # Con un server vLLM già avviato su localhost:8000:
-python extract_bur_grants.py bur_fvg --output results
+python extract_bur_grants.py bur_parte_prima --output results
 ```
 
 Per installazione del server, scelta del modello, opzioni, schema JSONL,
@@ -414,7 +414,7 @@ dei riferimenti di pagina. La descrizione conserva frasi conclusive come
 «Adozione.» e la citazione dell'atto è separata dalle norme richiamate.
 
 ```bash
-python extract_bur_grants.py BUR_fvg --output results --candidates-only
+python extract_bur_grants.py bur_parte_prima --output results --candidates-only
 ```
 
 Questo comando non richiede vLLM. Omettere `--candidates-only` per la conferma
@@ -428,8 +428,8 @@ l'intestazione e senza eseguire di nuovo il ritaglio. Anche i file senza titolo
 vengono elaborati normalmente; resta la verifica semantica del promotore regionale.
 
 ```bash
-python extract_bur_grants.py BUR_fvg --output results --candidates-only
-python extract_bur_grants.py BUR_fvg --output results
+python extract_bur_grants.py bur_parte_prima --output results --candidates-only
+python extract_bur_grants.py bur_parte_prima --output results
 ```
 
 Se si parte dai TXT grezzi dello scraper, la preparazione può essere eseguita
@@ -563,3 +563,18 @@ sovrascrivere i file originali. I report descrivono solo l'esecuzione corrente.
 ```bash
 python -m unittest -v test_extract_bur_part_one.py
 ```
+
+
+## Cartella di input predefinita per i bandi
+
+L'estrattore dei bandi legge soltanto i TXT in `./bur_parte_prima` e nelle sue
+sottocartelle. PDF e altri formati sono ignorati. È possibile omettere il percorso:
+
+```bash
+python extract_bur_grants.py --output results --candidates-only
+```
+
+Il percorso è relativo alla directory di esecuzione. Un argomento input esplicito
+resta disponibile per indicare il percorso della cartella preparata, per esempio
+`python extract_bur_grants.py /dati/bur_parte_prima --output results --candidates-only`.
+Non viene eseguita alcuna scansione automatica della cartella grezza `bur_fvg`.

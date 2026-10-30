@@ -1,6 +1,8 @@
 # Estrazione delle voci contenenti «bando»
 
-`extract_bur_grants.py` legge TXT **già filtrati alla Parte Prima regionale**.
+`extract_bur_grants.py` legge soltanto i file `.txt` (anche `.TXT`) nella cartella
+**`bur_parte_prima`**, incluse le sottocartelle annuali. I TXT devono essere
+**già filtrati alla Parte Prima regionale**.
 Non verifica intestazioni, non ritaglia sezioni e non converte PDF.
 
 L'unico criterio di selezione è la regex **`\bbando\b`**, senza distinzione tra
@@ -15,8 +17,20 @@ concorso passa questo primo stadio; l'eventuale conferma semantica resta a vLLM.
 Python 3.10 o successivo; il client usa soltanto la libreria standard.
 
 ```bash
-python extract_bur_grants.py BUR_fvg --output results --candidates-only
+python extract_bur_grants.py bur_parte_prima --output results --candidates-only
 ```
+
+La cartella predefinita è `./bur_parte_prima`, relativa alla directory da cui
+si esegue il comando. L'argomento input è facoltativo:
+
+```bash
+python extract_bur_grants.py --output results --candidates-only
+```
+
+Si può indicare esplicitamente `bur_parte_prima` oppure un suo percorso assoluto
+come argomento input. Il programma non cerca TXT nelle cartelle vicine, come
+`bur_fvg`, e non effettua ripieghi su di esse se `bur_parte_prima` manca: termina
+con codice 2.
 
 I PDF e gli altri formati vengono ignorati e registrati nell'inventario. I TXT
 UTF-8 (anche con BOM) sono letti direttamente, con ripiego CP1252 quando necessario.
@@ -96,7 +110,7 @@ Omettere `--candidates-only` per confermare semanticamente i risultati attravers
 un server compatibile con OpenAI Chat Completions e `response_format=json_schema`:
 
 ```bash
-python extract_bur_grants.py BUR_fvg --output results \
+python extract_bur_grants.py bur_parte_prima --output results \
   --base-url http://localhost:8000/v1 \
   --model Qwen/Qwen2.5-14B-Instruct-AWQ --workers 1
 ```

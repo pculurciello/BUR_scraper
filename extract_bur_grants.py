@@ -184,7 +184,8 @@ def confirm(candidate, args):
 
 def main():
     parser = argparse.ArgumentParser(description='Extract entries containing bando from prefiltered regional TXT; optional vLLM confirmation.')
-    parser.add_argument('input', type=Path, help='Directory of TXT files already limited to regional Part One')
+    parser.add_argument('input', type=Path, nargs='?', default=Path('bur_parte_prima'),
+                        help='Prefiltered TXT directory (default: ./bur_parte_prima, recursive)')
     parser.add_argument('--output', type=Path, default=Path('bur_grants_output'))
     parser.add_argument('--base-url', default=os.getenv('VLLM_BASE_URL', 'http://localhost:8000/v1'))
     parser.add_argument('--model', default=os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-32B-Instruct'))

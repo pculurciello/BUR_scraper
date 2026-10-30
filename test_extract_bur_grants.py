@@ -100,6 +100,44 @@ class ExtractionTests(unittest.TestCase):
             self.assertEqual(audit['source'], 'example.txt')
             self.assertEqual(audit['raw_text'], EXAMPLE[audit['start']:audit['end']])
 
+    def test_default_folder_reads_only_its_txt_files_recursively(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'bur_parte_prima' / '2026').mkdir(parents=True)
+            (root / 'bur_parte_prima' / '2026' / 'call.TXT').write_text(EXAMPLE, encoding='utf-8')
+            (root / 'bur_parte_prima' / 'ignored.pdf').write_bytes(b'not a PDF')
+            (root / 'bur_parte_prima' / 'ignored.json').write_text('{}')
+            (root / 'bur_fvg').mkdir()
+            (root / 'bur_fvg' / 'outside.txt').write_text('Bando outside the chosen input.')
+            previous = e.os.getcwd()
+            try:
+                e.os.chdir(root)
+                with patch.object(sys, 'argv', ['extract_bur_grants.py', '--output', 'results', '--candidates-only']):
+                    self.assertEqual(e.main(), 0)
+            finally:
+                e.os.chdir(previous)
+            rows = json.loads((root / 'results' / 'candidates.json').read_text())
+            self.assertEqual(rows, [{'text': EXAMPLE_TEXT, 'act': EXAMPLE_ACT}])
+            audit = json.loads((root / 'results' / 'candidates.jsonl').read_text())
+            self.assertEqual(Path(audit['source']), Path('2026/call.TXT'))
+
+    def test_missing_default_folder_does_not_fall_back_to_bur_fvg(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'bur_fvg').mkdir()
+            (root / 'bur_fvg' / 'outside.txt').write_text('Bando outside.')
+            previous = e.os.getcwd()
+            try:
+                e.os.chdir(root)
+                with patch.object(sys, 'argv', ['extract_bur_grants.py', '--candidates-only']), \
+                     patch('sys.stderr'):
+                    with self.assertRaises(SystemExit) as raised:
+                        e.main()
+                    self.assertEqual(raised.exception.code, 2)
+                self.assertFalse((root / 'bur_grants_output').exists())
+            finally:
+                e.os.chdir(previous)
+
     def test_empty_txt_is_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / 'input'
