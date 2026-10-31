@@ -540,10 +540,16 @@ formule tipiche del corpo degli atti, come “IL CONSIGLIO REGIONALE HA APPROVAT
 e “IL PRESIDENTE … PROMULGA”. L'output termina all'ultimo riferimento `pag. N`
 precedente al confine individuato. Non riprende l'estrazione nelle parti successive.
 
-Sono conservate le intestazioni del sommario ripetute sulle pagine di
-continuazione. L'intestazione iniziale dell'output viene uniformata, mentre
-il corpo selezionato mantiene il testo del TXT di origine. Le ripetizioni di
-intestazioni o pie di pagina gia nel corpo non vengono corrette automaticamente.
+L'output contiene soltanto le voci: non viene aggiunta l'intestazione della
+sezione e vengono rimosse anche le intestazioni del sommario ripetute sulle
+pagine successive. Sono eliminati il titolo del BUR con numero/data e le
+intestazioni o i pie di pagina identificati da «Bollettino ufficiale della
+Regione autonoma Friuli Venezia Giulia», anche quando il testo ripulito li
+ha uniti sulla stessa riga delle voci. La pulizia rimuove soltanto i metadati
+riconosciuti, preservando la voce successiva e i riferimenti `pag. N`.
+Il blocco editoriale storico delimitato da «Spedizione in abbonamento postale»
+e dalla clausola finale sulla pubblicita degli atti viene escluso. Un riferimento
+al Bollettino nel testo di una voce non e automaticamente considerato un header.
 
 Se mancano l'intestazione, i riferimenti di pagina o un confine sufficientemente
 riconoscibile, il file viene segnalato invece di includere potenzialmente
@@ -583,3 +589,21 @@ resta disponibile per indicare il percorso della cartella preparata, per esempio
 `python extract_bur_grants.py /dati/bur_parte_prima --output results --candidates-only`.
 Non viene eseguita alcuna scansione automatica della cartella grezza `bur_fvg`.
 
+
+
+
+### Rigenerare i file con sole voci del sommario
+
+```bash
+python extract_bur_part_one.py bur_fvg --output bur_parte_prima
+```
+
+L'estrazione usa ancora le intestazioni per individuare i confini, ma non le
+copia nei TXT di output. I file di output validi vengono aggiornati; i sorgenti
+restano intatti. La rimozione dei metadati non modifica i confini di esclusione
+delle altre parti e del testo integrale degli atti del 1999–2000.
+
+
+I TXT con sole voci non contengono piu l'intestazione richiesta da
+`extract_bur_grants.py` per verificare la Parte Prima. Per usare quell'estrattore
+con le opzioni attuali, continuare a fornirgli i TXT sorgenti completi del sommario.
