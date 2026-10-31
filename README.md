@@ -447,16 +447,20 @@ Le abbreviazioni comuni (`art.`, `n.`, `D.G.R.`, ecc.) non sono considerate
 una fine di frase. Il riconoscimento resta euristico nei casi ambigui.
 Non vengono aggiunti separatori artificiali `--- Pagina N ---`.
 
-Ogni trattino `-` a fine riga, anche seguito da spazi prima dell'a capo,
-viene eliminato assieme all'a capo e a tutti gli spazi circostanti, inclusi
-spazi non separabili Unicode e indentazione della riga successiva. Le due
-parti della parola sono unite senza separatori, indipendentemente dalla
-lunghezza: `finanzia -` + a capo + ` menti` diventa `finanziamenti`.
-Si applica la stessa regola ai trattini
-tipografici di sillabazione. La regola vale senza eccezioni: anche
-`socio-` + a capo + `economico` diventa `socioeconomico` e `1998-` + a capo +
-`2003` diventa `19982003`. I trattini interni a una riga sono conservati.
-Le parole spezzate possono essere ricomposte anche fra due pagine.
+Un trattino `-` a fine riga viene rimosso solo se e attaccato al carattere
+precedente: `contri-` + a capo + ` buti` diventa `contributi`. Vengono rimossi
+anche gli spazi dopo il trattino e l'indentazione della riga successiva,
+compresi gli spazi non separabili Unicode, senza lasciare separatori nella parola.
+
+Se invece il trattino e preceduto da whitespace (spazio, tabulazione o
+spazio Unicode), il trattino e la separazione precedente sono conservati:
+`Testo -` + a capo + `continuazione` diventa `Testo - continuazione`.
+Come nel resto della pulizia, sequenze di whitespace orizzontale vengono
+normalizzate a uno spazio, senza eliminare il separatore prima del trattino.
+La stessa regola si applica ai trattini tipografici di sillabazione; i soft
+hyphen restano caratteri discrezionali e vengono rimossi.
+I trattini interni a una riga sono conservati. Le parole spezzate con
+trattino attaccato possono essere ricomposte anche fra due pagine.
 
 Questa pulizia non corregge errori OCR, intestazioni gia presenti nel PDF o
 un ordine di lettura errato di colonne; il PDF originale resta il riferimento.
@@ -578,3 +582,4 @@ Il percorso è relativo alla directory di esecuzione. Un argomento input esplici
 resta disponibile per indicare il percorso della cartella preparata, per esempio
 `python extract_bur_grants.py /dati/bur_parte_prima --output results --candidates-only`.
 Non viene eseguita alcuna scansione automatica della cartella grezza `bur_fvg`.
+
