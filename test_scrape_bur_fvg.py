@@ -468,8 +468,8 @@ class PdfTextReflowTests(unittest.TestCase):
         cases = [
             ('contri-\nbuti', 'contributi'),
             ('contri-  \n  buti', 'contributi'),
-            ('mo -\ndificata', 'modificata'),
-            ('le -\ngislatura', 'legislatura'),
+            ('mo -\ndificata', 'mo - dificata'),
+            ('le -\ngislatura', 'le - gislatura'),
             ('suben-\ntrato', 'subentrato'),
             ('con-\ntri-\nbuti', 'contributi'),
             ('contribu\u2010\nzioni', 'contribuzioni'),
@@ -486,12 +486,12 @@ class PdfTextReflowTests(unittest.TestCase):
                          'contributi e risorse regionali.')
         self.assertEqual(bur.reflow_pdf_text(['con\u00adtributi']), 'contributi')
 
-    def test_all_line_final_hyphens_are_removed(self):
+    def test_attached_hyphens_removed_and_spaced_dash_preserved(self):
         text = bur.reflow_pdf_text(['socio-\neconomico e tecnico-scientifico. '
                                    'FRIULI-\nVENEZIA. COVID-\n19. 1998-\n2003. '
                                    'Titolo -\n nota.'])
         self.assertEqual(text, 'socioeconomico e tecnico-scientifico. FRIULIVENEZIA. '
-                              'COVID19. 19982003. Titolonota.')
+                              'COVID19. 19982003. Titolo - nota.')
 
     def test_empty_pages_remain_empty(self):
         self.assertEqual(bur.reflow_pdf_text(['', '  \n\t', '']), '')
@@ -638,7 +638,7 @@ class SentenceBoundaryReflowTests(unittest.TestCase):
         self.assertEqual(bur.reflow_pdf_text(['Fine del primo periodo.', 'Inizio del successivo.']),
                          'Fine del primo periodo.\nInizio del successivo.')
 
-    def test_removes_line_final_hyphens_without_exceptions(self):
+    def test_removes_attached_line_final_hyphens(self):
         cases = [('socio-\neconomico', 'socioeconomico'),
                  ('FRIULI-\nVENEZIA', 'FRIULIVENEZIA'),
                  ('1998-\n2003', '19982003'),
@@ -650,29 +650,43 @@ class SentenceBoundaryReflowTests(unittest.TestCase):
                 self.assertEqual(bur.reflow_pdf_text([raw]), expected)
 
 class HyphenWhitespaceRegressionTests(unittest.TestCase):
-    def test_long_fragments_do_not_keep_a_space(self):
-        cases = [('contri -\n buti', 'contributi'),
-                 ('finanzia - \n menti', 'finanziamenti'),
+    def test_spaced_hyphens_preserve_separator(self):
+        cases = [('contri -\n buti', 'contri - buti'),
+                 ('finanzia - \n menti', 'finanzia - menti'),
                  ('contribu- \n  zioni', 'contribuzioni')]
         for raw, expected in cases:
             with self.subTest(raw=raw):
                 self.assertEqual(bur.reflow_pdf_text([raw]), expected)
 
-    def test_unicode_spaces_around_wrapped_hyphen_are_removed(self):
+    def test_unicode_whitespace_before_dash_preserves_it(self):
         for space in ['\u00a0', '\u2003', '\u202f', '\t']:
             with self.subTest(space=repr(space)):
                 self.assertEqual(bur.reflow_pdf_text(['contri'+space+'-'+space+'\n'+space+'buti']),
-                                 'contributi')
+                                 'contri - buti')
 
-    def test_hyphen_across_pages_joins_indented_fragments(self):
+    def test_spaced_dash_across_pages_is_preserved(self):
         self.assertEqual(bur.reflow_pdf_text(['Le risorse finanzia -  ', '\u00a0menti.\nNuova frase.']),
-                         'Le risorse finanziamenti.\nNuova frase.')
+                         'Le risorse finanzia - menti.\nNuova frase.')
 
     def test_windows_line_endings_and_inline_hyphens(self):
         self.assertEqual(bur.reflow_pdf_text(['contribu - \r\n  zioni tecnico-scientifiche.']),
-                         'contribuzioni tecnico-scientifiche.')
+                         'contribu - zioni tecnico-scientifiche.')
+
+class SpacedDashPreservationTests(unittest.TestCase):
+    def test_attached_hyphen_still_removes_following_unicode_spaces(self):
+        for space in [' ', '\u00a0', '\u2003', '\u202f', '\t']:
+            with self.subTest(space=repr(space)):
+                self.assertEqual(bur.reflow_pdf_text(['contri-'+space+'\n'+space+'buti']), 'contributi')
+
+    def test_spaced_dash_keeps_word_separator(self):
+        self.assertEqual(bur.reflow_pdf_text(['Testo -\ncontinuazione.']), 'Testo - continuazione.')
+
+    def test_spaced_dash_and_attached_hyphen_in_same_sentence(self):
+        self.assertEqual(bur.reflow_pdf_text(['Testo -\ncon contri-\nbuti.\nNuova frase.']),
+                         'Testo - con contributi.\nNuova frase.')
 
 if __name__ == '__main__': unittest.main()
+
 
 
 
