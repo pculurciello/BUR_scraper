@@ -34,6 +34,80 @@ def footer_only(text):
     return all(word.casefold() in FOOTER_WORDS for word in words)
 
 
+MONTH = r'(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)'
+DATE = r'(?:\d{1,2}[./]\d{1,2}[./]\d{4}|\d{1,2}\s*' + MONTH + r'\s*\d{4})'
+PUBLICATION = re.compile(
+    r'\bBOLLETTINO\s+UFFICIAL\s*E\s*DELLA\s+REGIONE\s+AUTONOMA\s+'
+    r'FRIULI\s*[-–‐]?\s*VENEZIA\s+GIULIA\b', re.I)
+# Known masthead layouts: printed page/date on the left, issue/date on the
+# right. Match only their metadata, never the next summary entry.
+LEFT_METADATA = re.compile(
+    r'(?:\b\d+\s*[-–]\s*' + DATE + r'|\bN\.?\s*\d+)\s*$', re.I)
+RIGHT_METADATA = re.compile(
+    r'^[\s\x00-\x1f]*(?:(?:\d+\s*){0,2}(?:so\s*\d+\s*)?' + DATE +
+    r'(?:[ \t]*[-–][ \t]*\d+)?|(?:N|NUMERO)\.?[ \t]*\d+)', re.I)
+BUR_TITLE = re.compile(
+    r'(?:NUMERO|BUR[ \t]+N\.?)\s*\d+[ \t]*[-–][ \t]*' + DATE +
+    r'(?:[ \t]*[-–][ \t]*\d+)?', re.I)
+PAGE_MARKER = re.compile(r'---\s*Pagina\s+\d+\s*---', re.I)
+COVER_BOILERPLATE = re.compile(
+    r'\bSpedizione\s+in\s+abbonamento\s+postale\b.*?'
+    r'\bPer\s+quanto\s+in\s+esse\s+non\s+previsto\b.*?'
+    r'\bpubblicit[àa]\s+degli\s+atti\.', re.I | re.S)
+
+
+def entries_only(body):
+    """Remove section headings and page mastheads, including reflowed ones."""
+    body = PAGE_MARKER.sub('', body)
+    body = COVER_BOILERPLATE.sub('', body)
+    body = SUMMARY.sub('', body)
+    # Remove masthead metadata even when it spans lines or shares a line
+    # with entries after TXT reflow. Avoid dropping the entire mixed line.
+    spans = []
+    for publication in PUBLICATION.finditer(body):
+        before, after = body[:publication.start()], body[publication.end():]
+        left, right = LEFT_METADATA.search(before), RIGHT_METADATA.match(after)
+        line_start = body.rfind('\n', 0, publication.start()) + 1
+        line_end = body.find('\n', publication.end())
+        if line_end == -1:
+            line_end = len(body)
+        line = body[line_start:line_end]
+        line_prefix = body[line_start:publication.start()]
+        if footer_only(PUBLICATION.sub('', line)):
+            start, end = line_start, line_end
+            if right:
+                end = max(end, publication.end() + right.end())
+            spans.append((start, end))
+        elif left or right or not line_prefix.strip():
+            start = left.start() if left else publication.start()
+            end = publication.end() + right.end() if right else publication.end()
+            spans.append((start, end))
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    for start, end in reversed(merged):
+        body = body[:start] + ' ' + body[end:]
+    body = re.sub(r'^[ \t]*' + BUR_TITLE.pattern + r'[ \t]*(?:\n|$)', '', body, flags=re.I | re.M)
+    # A standalone BUR title can be at the start of a reflowed entry block,
+    # immediately after the preceding entry's pag. N reference.
+    pieces, start = [], 0
+    for locator in PAGE.finditer(body):
+        piece = body[start:locator.end()]
+        piece = re.sub(r'^\s*' + BUR_TITLE.pattern + r'\s*', '', piece, flags=re.I)
+        pieces.append(piece)
+        start = locator.end()
+    if start < len(body):
+        pieces.append(body[start:])
+    body = ''.join(pieces)
+    body = re.sub(r'[ \t]+', ' ', body)
+    body = re.sub(r' *\n *', '\n', body)
+    body = re.sub(r'\n{3,}', '\n\n', body)
+    return body.strip()
+
+
 def extract_section(text):
     """Fail closed when the summary heading or a reliable end is missing."""
     heading = SUMMARY.search(text)
@@ -69,9 +143,8 @@ def extract_section(text):
     if boundary == 'end_of_summary_file' and not footer_only(text[last:end]):
         result.update(stato='ambiguous_end', confine='unrecognized_trailing_text')
         return result
-    body = text[heading.end():last].strip()
-    body = re.sub(r'---\s*Pagina\s+\d+\s*---', '', body, flags=re.I).strip()
-    result.update(stato='ok', testo=HEADING + '\n\n' + body + '\n',
+    body = entries_only(text[heading.end():last])
+    result.update(stato='ok', testo=body + '\n',
                   voci=len(locators), inizio=heading.start(), fine=last, confine=boundary)
     return result
 
@@ -169,3 +242,4 @@ def main(argv=None):
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
