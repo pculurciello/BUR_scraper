@@ -5,6 +5,7 @@ Python >=3.10. Standard library only; no network, PDF conversion or LLM.
 from __future__ import annotations
 import argparse
 import csv
+from datetime import date
 import json
 from pathlib import Path
 import re
@@ -42,7 +43,7 @@ PUBLICATION = re.compile(
 # Known masthead layouts: printed page/date on the left, issue/date on the
 # right. Match only their metadata, never the next summary entry.
 LEFT_METADATA = re.compile(
-    r'(?:\b\d+\s*[-–]\s*' + DATE + r'|\bN\.?\s*\d+)\s*$', re.I)
+    r'(?:(?<!\d)\d+\s*[-–]\s*' + DATE + r'|\bN\.?\s*\d+)\s*$', re.I)
 RIGHT_METADATA = re.compile(
     r'^[\s\x00-\x1f]*(?:(?:\d+\s*){0,2}(?:so\s*\d+\s*)?' + DATE +
     r'(?:[ \t]*[-–][ \t]*\d+)?|(?:N|NUMERO)\.?[ \t]*\d+)', re.I)
@@ -54,6 +55,42 @@ COVER_BOILERPLATE = re.compile(
     r'\bSpedizione\s+in\s+abbonamento\s+postale\b.*?'
     r'\bPer\s+quanto\s+in\s+esse\s+non\s+previsto\b.*?'
     r'\bpubblicit[àa]\s+degli\s+atti\.', re.I | re.S)
+
+
+EMBEDDED_PAGE_DATE = re.compile(
+    r'(?P<left>[^\W\d_]+)(?P<page>\d{2,6})\s*[-–]\s*'
+    r'(?P<day>\d{1,2})[./](?P<month>\d{1,2})[./](?P<year>\d{4})'
+    r'\s*(?P<right>[^\W\d_]+)', re.UNICODE)
+
+
+def continuation(left, right):
+    return bool(left and right and left[-1].isalpha() and right[0].isalpha()
+                and (right[0].islower() or (left[-1].isupper() and right[0].isupper())))
+
+
+def splice_masthead(text, start, end):
+    """Remove metadata and reconnect a word interrupted by the masthead."""
+    left, right = text[:start], text[end:]
+    stripped = right.lstrip()
+    broken = re.search(r'(?<=\w)[-\u2010][ \t]*\n\s*$', left)
+    if broken and continuation(left[:broken.start()], stripped):
+        return left[:broken.start()] + stripped
+    if continuation(left, stripped):
+        return left + stripped
+    return left + ' ' + right
+
+
+def repair_embedded_page_dates(body):
+    """Repair orphaned numeric headers only when embedded in word fragments."""
+    def repair(match):
+        try:
+            date(int(match['year']), int(match['month']), int(match['day']))
+        except ValueError:
+            return match.group()
+        if not continuation(match['left'], match['right']):
+            return match.group()
+        return match['left'] + match['right']
+    return EMBEDDED_PAGE_DATE.sub(repair, body)
 
 
 def entries_only(body):
@@ -89,7 +126,8 @@ def entries_only(body):
         else:
             merged.append((start, end))
     for start, end in reversed(merged):
-        body = body[:start] + ' ' + body[end:]
+        body = splice_masthead(body, start, end)
+    body = repair_embedded_page_dates(body)
     body = re.sub(r'^[ \t]*' + BUR_TITLE.pattern + r'[ \t]*(?:\n|$)', '', body, flags=re.I | re.M)
     # A standalone BUR title can be at the start of a reflowed entry block,
     # immediately after the preceding entry's pag. N reference.
@@ -242,4 +280,5 @@ def main(argv=None):
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
