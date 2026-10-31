@@ -607,3 +607,27 @@ delle altre parti e del testo integrale degli atti del 1999–2000.
 I TXT con sole voci non contengono piu l'intestazione richiesta da
 `extract_bur_grants.py` per verificare la Parte Prima. Per usare quell'estrattore
 con le opzioni attuali, continuare a fornirgli i TXT sorgenti completi del sommario.
+
+
+
+### Numeri di pagina e date incastrati nelle parole
+
+La pulizia delle intestazioni gestisce anche il caso in cui la conversione
+abbia incollato il numero di pagina alla parola precedente. Per esempio,
+`rappresen4526 - 9/6/1999 tazione` viene ricomposto in `rappresentazione`,
+senza lasciare uno spazio tra i frammenti. Funziona anche quando il blocco
+comprende ancora il nome del Bollettino e quando la parola conserva un
+trattino di sillabazione attaccato prima dell'intestazione.
+
+Per i frammenti numerici rimasti senza il nome del Bollettino, la regola e
+limitata ai casi incorporati in frammenti alfabetici e a date valide. Non si
+eliminano indiscriminatamente date e numeri degli atti: `Decreto n. 4526 -
+9/6/1999` scritto separatamente resta nel testo. La ricomposizione e comunque
+una regola testuale per artefatti di impaginazione, non una verifica linguistica.
+
+Rigenerare i file usando i TXT sorgenti (con l'intestazione del sommario),
+non i TXT gia ridotti alle sole voci:
+
+```bash
+python extract_bur_part_one.py bur_fvg --output bur_parte_prima
+```
