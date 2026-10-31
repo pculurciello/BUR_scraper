@@ -423,9 +423,10 @@ def ends_sentence(line):
 def reflow_pdf_text(page_texts):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     text = '\n'.join(page_texts).replace('\r\n', '\n').replace('\r', '\n')
-    # Remove the hyphen AND all surrounding layout whitespace. Never leave
-    # a separator between fragments, regardless of length or Unicode spacing.
-    text = re.sub(r'[^\S\n]*[-\u2010\u00ad][^\S\n]*\n\s*', '', text)
+    # Rejoin only attached line-final hyphens. A hyphen preceded by any
+    # whitespace is a separate dash: preserve it and the preceding separator.
+    # Still discard whitespace after an attached hyphen and on the next line.
+    text = re.sub(r'(?<=\S)[-\u2010\u00ad][^\S\n]*\n\s*', '', text)
     text = text.replace('\u00ad', '')
     text = re.sub(r'[^\S\n]+', ' ', text)
     # Preserve existing line/paragraph separators only after a sentence end;
@@ -434,6 +435,7 @@ def reflow_pdf_text(page_texts):
                   lambda m: m.group(1).strip() +
                   (m.group(2) if ends_sentence(m.group(1)) else ' '), text)
     text = re.sub(r' *\n *', '\n', text)
+    text = re.sub(r' +', ' ', text)
     return text.strip()
 
 
@@ -714,6 +716,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
