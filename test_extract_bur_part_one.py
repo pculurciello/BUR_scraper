@@ -218,6 +218,47 @@ class EntriesOnlyCleanupTests(unittest.TestCase):
         self.assertNotIn('REDAZIONE', text)
         self.assertNotIn(self.publication, text)
 
+class EmbeddedPageDateTests(unittest.TestCase):
+    example = ('Bando per la realizzazione di opere cinematografiche originali di rievocazione '
+               'e rappresen4526 - 9/6/1999 tazione di fiabe e leggende appartenenti alla '
+               'tradizione popolare della Comunità del Friuli.')
+    expected = ('Bando per la realizzazione di opere cinematografiche originali di rievocazione '
+                'e rappresentazione di fiabe e leggende appartenenti alla '
+                'tradizione popolare della Comunità del Friuli.')
+    publication = EntriesOnlyCleanupTests.publication
+
+    def test_exact_user_example_is_repaired(self):
+        self.assertEqual(s.entries_only(self.example), self.expected)
+
+    def test_embedded_numeric_header_in_full_extraction(self):
+        result = s.extract_section(HEADER + self.example + ' pag. 4553')
+        self.assertEqual(result['stato'], 'ok')
+        self.assertEqual(result['testo'].strip(), self.expected + ' pag. 4553')
+
+    def test_full_masthead_attached_to_word_is_repaired(self):
+        text = 'rappresen4526 - 9/6/1999 ' + self.publication + ' N. 23 tazione di fiabe.'
+        self.assertEqual(s.entries_only(text), 'rappresentazione di fiabe.')
+
+    def test_raw_word_wrap_across_full_masthead_is_repaired(self):
+        text = 'rappresen-\n\n4526 - 9/6/1999 ' + self.publication + ' N. 23\ntazione di fiabe.'
+        self.assertEqual(s.entries_only(text), 'rappresentazione di fiabe.')
+
+    def test_masthead_between_whole_words_keeps_a_separator(self):
+        text = 'Contributi 4526 - 9/6/1999 ' + self.publication + ' N. 23 alle imprese.'
+        self.assertEqual(s.entries_only(text), 'Contributi alle imprese.')
+
+    def test_normal_legal_citations_are_preserved(self):
+        text = 'Decreto n. 4526 - 9/6/1999. Legge regionale 9/6/1999, n. 23.'
+        self.assertEqual(s.entries_only(text), text)
+
+    def test_invalid_date_is_not_treated_as_header(self):
+        text = 'rappresen4526 - 31/2/1999 tazione'
+        self.assertEqual(s.entries_only(text), text)
+
+    def test_uppercase_word_fragments_are_joined(self):
+        self.assertEqual(s.entries_only('RAPPRESEN4526 - 9/6/1999 TAZIONE'), 'RAPPRESENTAZIONE')
+
 if __name__ == '__main__':
     unittest.main()
+
 
