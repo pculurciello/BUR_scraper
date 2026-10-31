@@ -14,7 +14,8 @@ class SectionTests(unittest.TestCase):
         text = 'Bollettino ufficiale\n' + HEADER + ENTRY
         result = s.extract_section(text)
         self.assertEqual(result['stato'], 'ok')
-        self.assertTrue(result['testo'].startswith(s.HEADING))
+        self.assertTrue(result['testo'].startswith('Decreto del direttore n. 1.'))
+        self.assertNotIn('SOMMARIO', result['testo'])
         self.assertNotIn('Bollettino ufficiale', result['testo'])
         self.assertIn('Contributi alle imprese', result['testo'])
 
@@ -145,5 +146,78 @@ class OutputProtectionTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 s.main([str(source), '--output', tmp])
 
+class EntriesOnlyCleanupTests(unittest.TestCase):
+    publication = 'BOLLETTINO UFFICIALE DELLA REGIONE AUTONOMA FRIULI-VENEZIA GIULIA'
+    next_entry = 'Decreto n. 2 del 5 maggio 1999.\nContributi alle famiglie.\npag. 21'
+
+    def extract(self, header):
+        result = s.extract_section(HEADER + ENTRY + header + self.next_entry)
+        self.assertEqual(result['stato'], 'ok')
+        self.assertIn('Contributi alle imprese', result['testo'])
+        self.assertIn('Contributi alle famiglie', result['testo'])
+        self.assertIn('5 maggio 1999', result['testo'])
+        self.assertNotIn('SOMMARIO', result['testo'])
+        self.assertNotIn('LEGGI, REGOLAMENTI E ATTI DELLA REGIONE', result['testo'])
+        return result['testo']
+
+    def test_legacy_page_date_publication_issue_header(self):
+        text = self.extract('2690 - 17/3/1999 ' + self.publication + ' N. 11\n')
+        self.assertNotIn('2690', text)
+        self.assertNotIn('17/3/1999', text)
+        self.assertNotIn('N. 11', text)
+        self.assertNotIn(self.publication, text)
+
+    def test_legacy_issue_publication_date_page_header(self):
+        text = self.extract('N. 11 ' + self.publication + ' 17/3/1999 - 2691\n')
+        self.assertNotIn('2691', text)
+        self.assertNotIn('17/3/1999', text)
+        self.assertNotIn('N. 11', text)
+        self.assertNotIn(self.publication, text)
+
+    def test_modern_multiline_masthead_and_repeated_section(self):
+        text = self.extract(self.publication + ' 1\nso3019 ottobre 2026\n' + HEADER)
+        self.assertNotIn('ottobre 2026', text)
+        self.assertNotIn('so30', text)
+        self.assertNotIn(self.publication, text)
+
+    def test_reflowed_headers_do_not_drop_neighboring_entries(self):
+        source = ' '.join((HEADER + ENTRY + '2690 - 17/3/1999 ' + self.publication + ' N. 11 ' + self.next_entry).split())
+        result = s.extract_section(source)
+        self.assertEqual(result['stato'], 'ok')
+        self.assertIn('Contributi alle imprese', result['testo'])
+        self.assertIn('Contributi alle famiglie', result['testo'])
+        self.assertNotIn(self.publication, result['testo'])
+        self.assertNotIn('2690', result['testo'])
+        self.assertNotIn('N. 11', result['testo'])
+
+    def test_standalone_bur_number_date_title(self):
+        text = self.extract('NUMERO 42 - 21 OTTOBRE 2026\n')
+        self.assertNotIn('NUMERO 42', text)
+        self.assertNotIn('OTTOBRE 2026', text)
+
+    def test_inline_bur_title_after_page_locator(self):
+        source = ' '.join((HEADER + ENTRY + 'NUMERO 42 - 21 OTTOBRE 2026 ' + self.next_entry).split())
+        result = s.extract_section(source)
+        self.assertEqual(result['stato'], 'ok')
+        self.assertNotIn('NUMERO 42', result['testo'])
+        self.assertIn('Contributi alle famiglie', result['testo'])
+
+    def test_publication_reference_inside_entry_is_not_a_header(self):
+        entry = 'Decreto n. 3. Pubblicazione nel ' + self.publication + ' prevista dalla legge. pag. 22'
+        result = s.extract_section(HEADER + entry)
+        self.assertEqual(result['stato'], 'ok')
+        self.assertIn('Pubblicazione nel ' + self.publication, result['testo'])
+
+    def test_bounded_historical_cover_block_is_removed(self):
+        cover = ('Spedizione in abbonamento postale\nAnno XXXVI - N. 11\n' + self.publication +
+                 '\nTRIESTE, 17 marzo 1999 Lire 2.500\nDIREZIONE E REDAZIONE: TRIESTE\n'
+                 'Per quanto in esse non previsto si applicano le norme statali in materia di pubblicità degli atti.\n')
+        text = self.extract(cover)
+        self.assertNotIn('Spedizione', text)
+        self.assertNotIn('XXXVI', text)
+        self.assertNotIn('REDAZIONE', text)
+        self.assertNotIn(self.publication, text)
+
 if __name__ == '__main__':
     unittest.main()
+
