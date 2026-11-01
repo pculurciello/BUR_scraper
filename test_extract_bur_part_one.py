@@ -308,8 +308,62 @@ class CoverNoteVariantTests(unittest.TestCase):
         source = 'Spedizione in abbonamento postale. Nota con una chiusura sconosciuta.'
         self.assertEqual(s.entries_only(source), source)
 
+class OneLinePerEntryTests(unittest.TestCase):
+    def assert_entry_lines(self, result, expected):
+        self.assertEqual(result['stato'], 'ok')
+        lines = result['testo'].splitlines()
+        self.assertEqual(lines, expected)
+        self.assertEqual(result['voci'], len(lines))
+        for line in lines:
+            locators = list(s.PAGE.finditer(line))
+            self.assertEqual(len(locators), 1)
+            self.assertEqual(locators[0].end(), len(line))
+
+    def test_legacy_wrapped_entries_become_separate_single_lines(self):
+        source = HEADER + ENTRY + 'Legge regionale n. 2.\nAltri contributi.\npag. 21'
+        self.assert_entry_lines(s.extract_section(source), [
+            'Decreto del direttore n. 1. Contributi alle imprese. pag. 20',
+            'Legge regionale n. 2. Altri contributi. pag. 21'])
+
+    def test_reflowed_entries_are_split_after_page_number(self):
+        source = ' '.join((HEADER+ENTRY+'Decreto n. 2. Contributi alle famiglie. pag. 21').split())
+        self.assert_entry_lines(s.extract_section(source), [
+            'Decreto del direttore n. 1. Contributi alle imprese. pag. 20',
+            'Decreto n. 2. Contributi alle famiglie. pag. 21'])
+
+    def test_sentence_periods_do_not_split_an_entry(self):
+        source = HEADER + 'Legge regionale 1 giugno 2026, n. 1.\nArt. 1. Risorse.\nModalità di domanda.\npag. 20'
+        self.assert_entry_lines(s.extract_section(source), [
+            'Legge regionale 1 giugno 2026, n. 1. Art. 1. Risorse. Modalità di domanda. pag. 20'])
+
+    def test_same_page_number_still_separates_entries(self):
+        source = HEADER + ENTRY + 'Decreto n. 2. Seconda voce. pag. 20'
+        self.assertEqual(len(s.extract_section(source)['testo'].splitlines()), 2)
+
+    def test_wrapped_page_reference_case_and_ranges(self):
+        source = HEADER + 'Decreto n. 1. Contributi. PAG.\n20-21\nLegge n. 2. Risorse. pag. 22, 23'
+        self.assert_entry_lines(s.extract_section(source), [
+            'Decreto n. 1. Contributi. PAG. 20-21', 'Legge n. 2. Risorse. pag. 22, 23'])
+
+    def test_word_wraps_rejoin_but_spaced_dashes_remain(self):
+        source = HEADER+'Decreto n. 1. Contri-\nbuti -\nper le imprese. pag. 20'
+        self.assert_entry_lines(s.extract_section(source), [
+            'Decreto n. 1. Contributi - per le imprese. pag. 20'])
+
+    def test_headers_removed_before_entry_formatting(self):
+        source = (HEADER+ENTRY+'2690 - 17/3/1999 '+EntriesOnlyCleanupTests.publication+' N. 11\n'
+                  +'Decreto n. 2. Contributi alle famiglie. pag. 21')
+        self.assert_entry_lines(s.extract_section(source), [
+            'Decreto del direttore n. 1. Contributi alle imprese. pag. 20',
+            'Decreto n. 2. Contributi alle famiglie. pag. 21'])
+
+    def test_unterminated_remainder_is_not_silently_discarded(self):
+        with self.assertRaisesRegex(ValueError, 'Testo residuo'):
+            s.summary_entry_lines('Prima voce. pag. 20 Seconda voce priva di pagina')
+
 if __name__ == '__main__':
     unittest.main()
+
 
 
 
