@@ -51,10 +51,17 @@ BUR_TITLE = re.compile(
     r'(?:NUMERO|BUR[ \t]+N\.?)\s*\d+[ \t]*[-–][ \t]*' + DATE +
     r'(?:[ \t]*[-–][ \t]*\d+)?', re.I)
 PAGE_MARKER = re.compile(r'---\s*Pagina\s+\d+\s*---', re.I)
-COVER_BOILERPLATE = re.compile(
-    r'\bSpedizione\s+in\s+abbonamento\s+postale\b.*?'
+COVER_START = re.compile(r'Spedizione\s+in\s+abbonamento(?:\s+postale)?\b', re.I)
+COVER_OLD_END = re.compile(
     r'\bPer\s+quanto\s+in\s+esse\s+non\s+previsto\b.*?'
     r'\bpubblicit[àa]\s+degli\s+atti\.', re.I | re.S)
+COVER_LEGAL_END = re.compile(r'\bpriv[oa]\s+di\s+valore\s+(?:giuridico|legale)\s*\.', re.I)
+# A new entry or its page locator limits the cover-note search. This avoids
+# consuming a later entry that itself discusses a document's legal value.
+COVER_NEXT_ENTRY = re.compile(
+    r'\b(?:DECRETO|DELIBERAZIONE|LEGGE\s+REGIONALE|DIREZIONE\s+REGIONALE)\s+'
+    r'|^[ \t]*(?:Decreto|Deliberazione|Legge\s+regionale|Direzione\s+regionale)\s+'
+    r'|(?<=\.)\s*(?:Decreto|Deliberazione|Legge\s+regionale|Direzione\s+regionale)\s+', re.M)
 
 
 EMBEDDED_PAGE_DATE = re.compile(
@@ -80,6 +87,28 @@ def splice_masthead(text, start, end):
     return left + ' ' + right
 
 
+def remove_cover_notes(body):
+    """Remove both historical cover-note variants, including attached starts."""
+    starts = list(COVER_START.finditer(body))
+    spans = []
+    for index, start in enumerate(starts):
+        limit = starts[index + 1].start() if index + 1 < len(starts) else len(body)
+        for pattern in (COVER_NEXT_ENTRY, PAGE):
+            boundary = pattern.search(body, start.end(), limit)
+            if boundary:
+                limit = boundary.start()
+        # Prefer the final Internet-edition disclaimer if it follows the old
+        # publicity clause, instead of leaving the added paragraph behind.
+        end = COVER_LEGAL_END.search(body, start.end(), limit)
+        if end is None:
+            end = COVER_OLD_END.search(body, start.end(), limit)
+        if end:
+            spans.append((start.start(), end.end()))
+    for start, end in reversed(spans):
+        body = splice_masthead(body, start, end)
+    return body
+
+
 def repair_embedded_page_dates(body):
     """Repair orphaned numeric headers only when embedded in word fragments."""
     def repair(match):
@@ -96,7 +125,7 @@ def repair_embedded_page_dates(body):
 def entries_only(body):
     """Remove section headings and page mastheads, including reflowed ones."""
     body = PAGE_MARKER.sub('', body)
-    body = COVER_BOILERPLATE.sub('', body)
+    body = remove_cover_notes(body)
     body = SUMMARY.sub('', body)
     # Remove masthead metadata even when it spans lines or shares a line
     # with entries after TXT reflow. Avoid dropping the entire mixed line.
@@ -280,5 +309,6 @@ def main(argv=None):
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
