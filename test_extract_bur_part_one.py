@@ -258,7 +258,58 @@ class EmbeddedPageDateTests(unittest.TestCase):
     def test_uppercase_word_fragments_are_joined(self):
         self.assertEqual(s.entries_only('RAPPRESEN4526 - 9/6/1999 TAZIONE'), 'RAPPRESENTAZIONE')
 
+class CoverNoteVariantTests(unittest.TestCase):
+    old_end = ('Per quanto in esse non previsto si applicano le norme statali '
+               'in materia di pubblicità degli atti.')
+    new_paragraph = ('La versione integrale dei testi è consultabile online. '
+                     'La riproduzione del Bollettino sul sito Internet è pertanto priva di valore giuridico.')
+    cover_start = 'Spedizione in abbonamento postale. DIREZIONE E REDAZIONE: TRIESTE. '
+    next_entry = 'DECRETO DEL DIRETTORE n. 2. Contributi alle famiglie. pag. 21'
+
+    def test_disclaimer_after_old_clause_is_also_removed(self):
+        cover = self.cover_start + self.old_end + '\n' + self.new_paragraph + '\n'
+        result = s.extract_section(HEADER+ENTRY+cover+self.next_entry)
+        self.assertEqual(result['stato'], 'ok')
+        self.assertNotIn('Spedizione', result['testo'])
+        self.assertNotIn('consultabile online', result['testo'])
+        self.assertNotIn('valore giuridico', result['testo'])
+        self.assertIn('Contributi alle famiglie', result['testo'])
+        self.assertIn('Contributi alle imprese', result['testo'])
+
+    def test_privo_variant_without_old_clause(self):
+        cover = 'Spedizione in abbonamento\nNota editoriale.\nDocumento privo di\nvalore giuridico.\n'
+        self.assertEqual(s.entries_only(cover+self.next_entry), self.next_entry)
+
+    def test_value_legale_variant(self):
+        cover = self.cover_start + 'Documento privo di valore legale. '
+        self.assertEqual(s.entries_only(cover+self.next_entry), self.next_entry)
+
+    def test_note_attached_inside_word_is_removed_without_leaving_a_gap(self):
+        source = 'Piano parti' + self.cover_start + self.old_end + ' ' + self.new_paragraph + ' colareggiato.'
+        self.assertEqual(s.entries_only(source), 'Piano particolareggiato.')
+
+    def test_old_note_does_not_consume_a_later_act_mentioning_legal_value(self):
+        for entry in ['DECRETO DEL DIRETTORE n. 2.', 'Decreto del direttore n. 2.']:
+            with self.subTest(entry=entry):
+                following = entry + ' Documento privo di valore giuridico. Contributi alle famiglie. pag. 21'
+                source = self.cover_start + self.old_end + ' ' + following
+                self.assertEqual(s.entries_only(source), following)
+
+    def test_repeated_notes_are_removed_independently(self):
+        source = (self.cover_start + self.old_end + ' ' + self.next_entry + ' '
+                  + self.cover_start + self.new_paragraph + ' DECRETO n. 3. Altro atto. pag. 22')
+        result = s.entries_only(source)
+        self.assertNotIn('Spedizione', result)
+        self.assertNotIn('valore giuridico', result)
+        self.assertIn(self.next_entry, result)
+        self.assertIn('Altro atto', result)
+
+    def test_unterminated_note_is_not_deleted_blindly(self):
+        source = 'Spedizione in abbonamento postale. Nota con una chiusura sconosciuta.'
+        self.assertEqual(s.entries_only(source), source)
+
 if __name__ == '__main__':
     unittest.main()
+
 
 
