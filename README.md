@@ -547,8 +547,9 @@ intestazioni o i pie di pagina identificati da «Bollettino ufficiale della
 Regione autonoma Friuli Venezia Giulia», anche quando il testo ripulito li
 ha uniti sulla stessa riga delle voci. La pulizia rimuove soltanto i metadati
 riconosciuti, preservando la voce successiva e i riferimenti `pag. N`.
-Il blocco editoriale storico delimitato da «Spedizione in abbonamento postale»
-e dalla clausola finale sulla pubblicita degli atti viene escluso. Un riferimento
+Il blocco editoriale storico che inizia con «Spedizione in abbonamento»
+e escluso fino alla clausola finale sulla pubblicita degli atti, oppure fino
+alla successiva clausola «privo/priva di valore giuridico» quando presente. Un riferimento
 al Bollettino nel testo di una voce non e automaticamente considerato un header.
 
 Se mancano l'intestazione, i riferimenti di pagina o un confine sufficientemente
@@ -627,6 +628,29 @@ una regola testuale per artefatti di impaginazione, non una verifica linguistica
 
 Rigenerare i file usando i TXT sorgenti (con l'intestazione del sommario),
 non i TXT gia ridotti alle sole voci:
+
+```bash
+python extract_bur_part_one.py bur_fvg --output bur_parte_prima
+```
+
+
+
+### Nota editoriale storica e disclaimer del sito Internet
+
+Sono gestite entrambe le chiusure del blocco che inizia con «Spedizione in
+abbonamento [postale]»: la clausola sulla pubblicita degli atti e il successivo
+disclaimer «privo/priva di valore giuridico» (anche «valore legale»).
+Se il disclaimer segue la prima clausola, viene eliminato l'intero blocco,
+compresi i paragrafi sulla consultazione online e sull'archivio del Bollettino.
+
+Il riconoscimento funziona con a capo originali e testo ripulito, e anche se
+«Spedizione» e stata incollata alla parola precedente dalla conversione.
+La ricerca della fine si ferma all'intestazione o al riferimento di pagina
+della voce successiva, per non tagliare un atto che menzioni a sua volta il
+valore giuridico di un documento. In assenza di una chiusura riconosciuta il
+blocco non viene cancellato alla cieca.
+
+Rigenerare dalla directory dei TXT sorgenti:
 
 ```bash
 python extract_bur_part_one.py bur_fvg --output bur_parte_prima
