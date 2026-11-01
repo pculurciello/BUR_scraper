@@ -406,12 +406,14 @@ Il primo stadio di `extract_bur_grants.py` cerca soltanto la parola intera
 strict/broad sono state rimosse. Ogni voce produce in `candidates.json`:
 
 ```json
-{"text": "Bando per contributi alle imprese. Adozione.", "act": "Deliberazione della Giunta regionale 6 febbraio 2026, n. 143"}
+{"text": "Bando per contributi alle imprese. Adozione.", "act": "Deliberazione della Giunta regionale 6 febbraio 2026, n. 143", "legal_references": null, "page": 101, "source": "2026/esempio.txt", "line_number": 1, "parse_warnings": []}
 ```
 
-L'output è un array JSON; `candidates.jsonl` aggiunge fonte, offset e contesto
-dei riferimenti di pagina. La descrizione conserva frasi conclusive come
-«Adozione.» e la citazione dell'atto è separata dalle norme richiamate.
+L'input contiene una voce completa per riga, terminata da `pag. NN`.
+L'output è un array JSON; ogni record ha `text` (titolo completo), `act`,
+`legal_references`, `page` (pagina della stessa riga), `source`, `line_number`
+e `parse_warnings`. Il JSONL conserva gli stessi campi e aggiunge riga originale
+e offset. Non si cercano più pagine nelle voci vicine.
 
 ```bash
 python extract_bur_grants.py bur_parte_prima --output results --candidates-only
@@ -681,3 +683,18 @@ Il riconoscimento assume che i riferimenti `pag. NN` siano i terminatori
 delle voci, come nel sommario; un riferimento dello stesso formato all'interno
 di un titolo verrebbe interpretato come confine. I file sorgenti restano intatti.
 Rigenerare gli output con il comando di estrazione gia usato.
+
+
+## Struttura delle righe per estrarre i bandi
+
+Ogni riga dei TXT in `bur_parte_prima` deve contenere una voce completa:
+
+```text
+Deliberazione della Giunta regionale 6 febbraio 2026, n. 143 LR 24/2021, art. 3, commi 17-29. Bando regionale. Adozione. pag. 101.
+```
+
+In entrambi gli output l'atto è separato dalla base normativa e dal titolo;
+`page` vale `101` e si riferisce esclusivamente a quella riga. Il titolo completo
+«Bando regionale. Adozione.» è conservato, senza `pag. 101`. I campi mancanti sono
+segnalati in `parse_warnings`, senza copiarli dalla riga precedente o successiva.
+Schema ed esempio completo nella [guida](docs/GRANT_EXTRACTION.md#campi-di-candidatesjson-e-candidatesjsonl).

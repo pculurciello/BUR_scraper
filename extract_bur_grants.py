@@ -14,10 +14,10 @@ import urllib.request
 
 # The ONLY selection criterion is the standalone word "bando", any case.
 BANDO = re.compile(r'\bbando\b', re.I)
-PAGE = re.compile(r'(?<!\w)pag(?:ina)?\.?\s*(?P<number>\d+)(?:\s*[-–,]\s*\d+)*(?=\s|$)', re.I)
+PAGE = re.compile(r'\bpag(?:ina)?\.?[ \t]*(?P<number>\d+)[ \t]*\.?[ \t]*$', re.I)
 MONTHS = (r'gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|'
           r'settembre|ottobre|novembre|dicembre')
-ACT_TYPE = (r'Deliberazione(?:\s+della\s+Giunta(?:\s+regionale)?)?|'
+ACT_TYPE = (r'Delibera(?:zione)?(?:\s+della\s+Giunta(?:\s+regionale)?)?|'
             r'Decreto|Legge(?:\s+regionale)?|D\s*\.\s*G\s*\.\s*R\s*\.|'
             r'D\s*\.\s*P\s*\.\s*(?:G\s*\.\s*)?R\s*\.|D\s*\.\s*D\s*\.')
 DATE = rf'(?:\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}}|\d{{1,2}}[./]\d{{1,2}}[./]\d{{4}})'
@@ -27,61 +27,80 @@ ACT_CITATION = re.compile(
 # Incomplete citations are preserved as written rather than inventing dates.
 SHORT_CITATION = re.compile(
     rf'\b(?:{ACT_TYPE})[^;!?]{{0,180}}?\bn[.°º]\s*{NUMBER}', re.I)
-SENTENCE_END = re.compile(r'[.!?](?:["”»])?\s+(?=[A-ZÀ-ÖØ-Þ])')
+# Only a leading legal basis is separated; citations inside the title stay there.
+LEGAL_START = re.compile(
+    r'^(?:L\s*\.?\s*R\s*\.?\s*\d|Legge(?:\s+regionale)?\s+\d|'
+    r'art(?:\.|icol[oi]|t\.)?\s*\d|comm[ai]\s+\d|'
+    r'D\s*\.?\s*G\s*\.?\s*R\s*\.?\s*\d|'
+    r'D\s*\.?\s*P\s*\.?\s*R\s*\.?\s*\d)', re.I)
+LEGAL_END = re.compile(r'\.\s+(?=[A-ZÀ-ÖØ-Þ])')
+PUBLIC_FIELDS = ('text', 'act', 'legal_references', 'page', 'source',
+                 'line_number', 'parse_warnings')
 
 
 def compact(text):
     return ' '.join(text.split())
 
 
-def entry_spans(text):
-    """Use page locators and act headings to separate summary entries."""
-    boundaries = {0, len(text)}
-    for page in PAGE.finditer(text):
-        boundaries.update((page.start(), page.end()))
-    for match in ACT_CITATION.finditer(text):
-        line_prefix = text[text.rfind('\n', 0, match.start()) + 1:match.start()]
-        preceding = text[:match.start()].rstrip()
-        if (not line_prefix.strip() or not preceding
-                or (preceding[-1:] in '.!?' and text[match.start()].isupper())):
-            boundaries.add(match.start())
-    boundaries = sorted(boundaries)
-    for start, end in zip(boundaries, boundaries[1:]):
-        if text[start:end].strip() and not PAGE.fullmatch(text[start:end].strip()):
-            yield start, end
+def split_legal_basis(rest):
+    """Return (basis text, title start, ambiguous) without discarding text."""
+    if not LEGAL_START.match(rest):
+        return None, 0, False
+    for ending in LEGAL_END.finditer(rest):
+        prefix = rest[:ending.end()].strip()
+        # A spaced abbreviation such as L. R. is not the end of the basis.
+        if not re.search(r'\d', prefix):
+            continue
+        if LEGAL_START.match(rest[ending.end():]):
+            continue
+        return compact(prefix), ending.end(), False
+    return None, 0, True
 
 
 def candidates(text):
-    """One record per summary entry containing bando, regardless of its topic.
-
-    Keep the sentence containing bando and its following closing sentences.
-    Missing act citations do not exclude a match: act is null and can be reviewed.
-    """
-    pages = list(PAGE.finditer(text))
-    for start, end in entry_spans(text):
-        entry = text[start:end]
-        keyword = BANDO.search(entry)
-        if not keyword:
+    """Parse exactly one summary entry per physical line; never borrow context."""
+    offset = 0
+    for line_number, physical in enumerate(text.splitlines(keepends=True), 1):
+        line = physical.rstrip('\r\n')
+        if not BANDO.search(line):
+            offset += len(physical)
             continue
-        prefix = entry[:keyword.start()]
-        citation = ACT_CITATION.search(prefix) or SHORT_CITATION.search(prefix)
+        warnings = []
+        page_match = PAGE.search(line)
+        page = int(page_match['number']) if page_match else None
+        if not page_match:
+            warnings.append('missing_trailing_page')
+        body_end = page_match.start() if page_match else len(line)
+        body = line[:body_end]
+        leading = len(body) - len(body.lstrip())
+        body = body[leading:]
+        citation = ACT_CITATION.match(body) or SHORT_CITATION.match(body)
         act = compact(citation.group()).rstrip(' .') if citation else None
-        description_start = citation.end() if citation else 0
-        # Skip the legal basis preceding the sentence with bando. Do not split
-        # within dates, n., art., LR references, or abbreviations in that sentence.
-        for boundary in SENTENCE_END.finditer(entry, description_start, keyword.start() + 1):
-            description_start = boundary.end()
-        while description_start < len(entry) and entry[description_start].isspace():
-            description_start += 1
-        description_end = len(entry.rstrip())
-        raw = entry[description_start:description_end]
-        if not BANDO.search(raw):
-            continue
-        yield {'text': compact(raw), 'act': act,
-               'start': start + description_start, 'end': start + description_end,
-               'raw_text': raw,
-               'page_before': next((p['number'] for p in reversed(pages) if p.end() <= start), None),
-               'page_after': next((p['number'] for p in pages if p.start() >= end), None)}
+        if citation:
+            title_start = citation.end()
+            # The citation's terminal full stop is punctuation, not title text.
+            if title_start < len(body) and body[title_start] == '.':
+                title_start += 1
+        else:
+            title_start = 0
+            warnings.append('unrecognized_act')
+        while title_start < len(body) and body[title_start].isspace():
+            title_start += 1
+        legal_references, basis_end, ambiguous = split_legal_basis(body[title_start:]) if citation else (None, 0, False)
+        title_start += basis_end
+        while title_start < len(body) and body[title_start].isspace():
+            title_start += 1
+        if ambiguous:
+            warnings.append('ambiguous_legal_basis')
+        title_end = len(body.rstrip())
+        raw = body[title_start:title_end]
+        if not raw:
+            warnings.append('empty_title')
+        yield {'text': compact(raw), 'act': act, 'legal_references': legal_references,
+               'page': page, 'line_number': line_number, 'parse_warnings': warnings,
+               'start': offset + leading + title_start, 'end': offset + leading + title_end,
+               'raw_text': raw, 'raw_entry': line}
+        offset += len(physical)
 
 
 KINDS = ['law', 'presidential_decree', 'directors_decree', 'deliberation']
@@ -149,7 +168,8 @@ def validate(obj, text):
 
 
 def confirm(candidate, args):
-    context = ((candidate.get('act') or '') + '\n' + candidate['text']).strip()
+    context = '\n'.join(part for part in [candidate.get('act'),
+                         candidate.get('legal_references'), candidate['text']] if part)
     payload = {'model': args.model, 'temperature': 0, 'max_tokens': 4096,
                'messages': [{'role': 'system', 'content': PROMPT},
                             {'role': 'user', 'content': context}],
@@ -220,7 +240,8 @@ def main():
                     raise ValueError('Empty TXT file: regenerate the bulletin text before extraction')
                 items = [{**c, 'source': source} for c in candidates(text)]
                 pending.extend(items)
-                record.update(status='ok', characters=len(text), candidates=len(items))
+                record.update(status='ok', characters=len(text), candidates=len(items),
+                              candidates_with_warnings=sum(bool(c['parse_warnings']) for c in items))
             except Exception as exc:
                 record.update(status='read_error', error=str(exc))
                 failures = True
@@ -229,7 +250,7 @@ def main():
         for candidate in pending:
             handle.write(json.dumps(candidate, ensure_ascii=False) + '\n')
     (args.output / 'candidates.json').write_text(
-        json.dumps([{'text': c['text'], 'act': c['act']} for c in pending],
+        json.dumps([{key: c[key] for key in PUBLIC_FIELDS} for c in pending],
                    ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f'{len(pending)} entries containing bando', flush=True)
     if not args.candidates_only:

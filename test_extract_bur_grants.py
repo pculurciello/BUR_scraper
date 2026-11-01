@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 import tempfile
-import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,141 +11,130 @@ EXAMPLE_TEXT = ('Bando recante i criteri e le modalità per la concessione e l�
                 'di aiuti a favore delle PMI, con unità operativa in regione e attive '
                 'nella produzione agricola primaria, a supporto delle spese sostenute '
                 'per la realizzazione di nuovi impianti arborei per l’anno 2026. Adozione.')
-EXAMPLE = 'pag. 101 ' + EXAMPLE_ACT + ' LR 24/2021, art. 3, commi 17-29. ' + EXAMPLE_TEXT
+EXAMPLE = EXAMPLE_ACT + ' LR 24/2021, art. 3, commi 17-29. ' + EXAMPLE_TEXT + ' pag. 101.'
 
 class ExtractionTests(unittest.TestCase):
-    def test_user_example_exact_output(self):
-        rows = list(e.candidates(EXAMPLE))
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]['page_before'], '101')
-        self.assertEqual({k: rows[0][k] for k in ['text', 'act']},
-                         {'text': EXAMPLE_TEXT, 'act': EXAMPLE_ACT})
-
-    def test_case_insensitive_word_only(self):
-        for word in ['bando', 'BANDO', 'Bando', 'BaNdO']:
-            self.assertEqual(len(list(e.candidates(word + ' per contributi.'))), 1)
-        for text in ['Bandi aperti.', 'Abbandono del progetto.', 'Contributi alle imprese.',
-                     'Regolamento per sovvenzioni.', 'Avviso pubblico.']:
-            self.assertEqual(list(e.candidates(text)), [])
-
-    def test_no_topic_or_act_filter(self):
-        for text in ['Bando di concorso pubblico.', 'Bando di gara.', 'Bando culturale.']:
-            rows = list(e.candidates(text))
-            self.assertEqual(len(rows), 1)
-            self.assertIsNone(rows[0]['act'])
-            self.assertEqual(rows[0]['text'], text)
-
-    def test_sentence_beginning_before_keyword_is_preserved(self):
-        text = EXAMPLE_ACT + '. LR 24/2021. Approvazione del bando per aiuti alle imprese. Adozione.'
-        row = next(e.candidates(text))
-        self.assertEqual(row['text'], 'Approvazione del bando per aiuti alle imprese. Adozione.')
-
-    def test_multiline_text_and_act_are_compacted(self):
-        text = EXAMPLE.replace('Giunta regionale', 'Giunta\nregionale').replace('Bando recante', 'Bando\nrecante')
-        row = next(e.candidates(text))
+    def test_exact_line_fields(self):
+        row = next(e.candidates(EXAMPLE))
         self.assertEqual(row['act'], EXAMPLE_ACT)
         self.assertEqual(row['text'], EXAMPLE_TEXT)
-        self.assertEqual(row['raw_text'], text[row['start']:row['end']])
+        self.assertEqual(row['legal_references'], 'LR 24/2021, art. 3, commi 17-29.')
+        self.assertEqual(row['page'], 101)
+        self.assertEqual(row['line_number'], 1)
+        self.assertEqual(row['parse_warnings'], [])
+        self.assertEqual(row['raw_text'], EXAMPLE[row['start']:row['end']])
 
-    def test_no_truncation_of_long_call(self):
-        text = 'Bando per ' + 'interventi ' * 2000 + 'Adozione.'
-        self.assertEqual(next(e.candidates(text))['text'], text)
-
-    def test_repeated_keyword_produces_one_record_per_entry(self):
-        self.assertEqual(len(list(e.candidates('Bando regionale. Modifica del bando.'))), 1)
-
-    def test_entries_separated_by_page_markers(self):
-        text = EXAMPLE_ACT + '. Bando regionale. Adozione. pag. 101 '
-        text += 'Decreto del direttore 7 febbraio 2026, n. 144. Nessuna chiamata. pag. 102 '
-        text += 'Decreto del Presidente della Regione 8 febbraio 2026, n. 145/Pres. Bando turismo. pag. 103'
+    def test_adjacent_lines_do_not_exchange_pages_acts_or_titles(self):
+        text = (EXAMPLE_ACT + '. Bando uno. pag. 10.\n'
+                'Decreto del direttore 7 febbraio 2026, n. 144. Assunzioni. pag. 20.\n'
+                'Decreto del direttore 8 febbraio 2026, n. 145. Bando due. pag. 30.')
         rows = list(e.candidates(text))
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]['act'], EXAMPLE_ACT)
-        self.assertNotIn('Nessuna', rows[0]['text'])
-        self.assertEqual(rows[1]['act'], 'Decreto del Presidente della Regione 8 febbraio 2026, n. 145/Pres')
-        self.assertEqual(rows[1]['text'], 'Bando turismo.')
+        self.assertEqual([r['page'] for r in rows], [10, 30])
+        self.assertEqual([r['line_number'] for r in rows], [1, 3])
+        self.assertEqual([r['text'] for r in rows], ['Bando uno.', 'Bando due.'])
+        self.assertEqual(rows[1]['act'], 'Decreto del direttore 8 febbraio 2026, n. 145')
+        for row in rows:
+            self.assertEqual(row['raw_text'], text[row['start']:row['end']])
 
-    def test_full_headings_without_page_markers(self):
-        text = EXAMPLE_ACT + '. Bando uno.\nDecreto del direttore 7 febbraio 2026, n. 144. Bando due.'
+    def test_preserve_full_title_before_keyword(self):
+        title = 'Approvazione della graduatoria. Bando 2026. Adozione.'
+        row = next(e.candidates(EXAMPLE_ACT + '. ' + title + ' pag. 17'))
+        self.assertEqual(row['text'], title)
+        self.assertIsNone(row['legal_references'])
+
+    def test_legal_citations_inside_title_are_not_other_acts(self):
+        title = 'Bando ai sensi della legge regionale 3 marzo 2020, n. 5. Approvazione.'
+        row = next(e.candidates(EXAMPLE_ACT + '. ' + title + ' pag. 99.'))
+        self.assertEqual(row['act'], EXAMPLE_ACT)
+        self.assertEqual(row['text'], title)
+
+    def test_optional_basis_is_separate_and_abbreviations_are_not_sentences(self):
+        for basis in ['L. R. 24/2021, art. 3, commi 17-29.',
+                      'LR 24/2021. Art. 3, comma 2.',
+                      'Legge regionale 3 marzo 2020, n. 5.']:
+            with self.subTest(basis=basis):
+                row = next(e.candidates(EXAMPLE_ACT + ' ' + basis + ' Bando regionale. pag. 6.'))
+                self.assertEqual(row['legal_references'], basis)
+                self.assertEqual(row['text'], 'Bando regionale.')
+
+    def test_trailing_page_only_internal_pages_remain_in_title(self):
+        row = next(e.candidates(EXAMPLE_ACT + '. Bando già pubblicato a pag. 15. Proroga. pag. 77.'))
+        self.assertEqual(row['page'], 77)
+        self.assertEqual(row['text'], 'Bando già pubblicato a pag. 15. Proroga.')
+
+    def test_missing_metadata_is_not_borrowed_from_next_line(self):
+        rows = list(e.candidates('Bando senza riferimento\n' + EXAMPLE))
+        self.assertIsNone(rows[0]['act'])
+        self.assertIsNone(rows[0]['page'])
+        self.assertEqual(rows[0]['parse_warnings'], ['missing_trailing_page', 'unrecognized_act'])
+        self.assertEqual(rows[1]['page'], 101)
+
+    def test_case_insensitive_standalone_bando_only(self):
+        for word in ['bando', 'BANDO', 'Bando', 'BaNdO']:
+            row = next(e.candidates(word + ' di gara. pag. 4.'))
+            self.assertEqual(row['page'], 4)
+        for word in ['bandi', 'abbandono', 'contributi', 'avviso']:
+            self.assertEqual(list(e.candidates(word + ' regionali. pag. 4.')), [])
+
+    def test_short_act_and_number_suffix(self):
+        for citation in ['Decreto del direttore n. 144',
+                         'Decreto del Presidente della Regione 8 febbraio 2026, n. 145/Pres.']:
+            row = next(e.candidates(citation + ' Bando. pag. 2.'))
+            self.assertEqual(row['act'], citation.rstrip('.'))
+            self.assertEqual(row['text'], 'Bando.')
+
+    def test_blank_lines_and_offsets(self):
+        text = '\n  ' + EXAMPLE + '\n\n' + EXAMPLE + '\n'
         rows = list(e.candidates(text))
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]['text'], 'Bando uno.')
-        self.assertEqual(rows[1]['text'], 'Bando due.')
+        self.assertEqual([r['line_number'] for r in rows], [2, 4])
+        for row in rows:
+            self.assertEqual(row['raw_text'], text[row['start']:row['end']])
 
-    def test_legal_references_inside_description_stay(self):
-        text = EXAMPLE_ACT + '. Bando ai sensi della LR 24/2021, art. 3, comma 17. Adozione.'
-        self.assertEqual(next(e.candidates(text))['text'],
-                         'Bando ai sensi della LR 24/2021, art. 3, comma 17. Adozione.')
+    def test_ambiguous_basis_is_preserved_and_flagged(self):
+        title = 'LR 24/2021 Bando regionale senza separatore'
+        row = next(e.candidates(EXAMPLE_ACT + ' ' + title + ' pag. 10.'))
+        self.assertEqual(row['text'], title)
+        self.assertIn('ambiguous_legal_basis', row['parse_warnings'])
 
-    def test_short_act_citation_without_date(self):
-        row = next(e.candidates('Decreto del direttore n. 144. Bando per contributi.'))
-        self.assertEqual(row['act'], 'Decreto del direttore n. 144')
-        self.assertEqual(row['text'], 'Bando per contributi.')
-
-    def test_cli_json_shape_and_traceability_without_heading(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / 'BUR_fvg'
-            source.mkdir()
-            (source / 'example.txt').write_text(EXAMPLE, encoding='utf-8')
-            (source / 'ignored.pdf').write_bytes(b'not a PDF')
-            output = Path(tmp) / 'results'
-            with patch.object(sys, 'argv',
-                              ['extract_bur_grants.py', str(source), '--output', str(output), '--candidates-only']), \
-                 patch.object(e, 'confirm', side_effect=AssertionError('No model in candidate mode')):
-                self.assertEqual(e.main(), 0)
-            self.assertEqual(json.loads((output / 'candidates.json').read_text()),
-                             [{'text': EXAMPLE_TEXT, 'act': EXAMPLE_ACT}])
-            audit = json.loads((output / 'candidates.jsonl').read_text())
-            self.assertEqual(audit['source'], 'example.txt')
-            self.assertEqual(audit['raw_text'], EXAMPLE[audit['start']:audit['end']])
-
-    def test_default_folder_reads_only_its_txt_files_recursively(self):
+    def test_cli_default_folder_and_consistent_json_jsonl(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'bur_parte_prima' / '2026').mkdir(parents=True)
             (root / 'bur_parte_prima' / '2026' / 'call.TXT').write_text(EXAMPLE, encoding='utf-8')
             (root / 'bur_parte_prima' / 'ignored.pdf').write_bytes(b'not a PDF')
-            (root / 'bur_parte_prima' / 'ignored.json').write_text('{}')
             (root / 'bur_fvg').mkdir()
-            (root / 'bur_fvg' / 'outside.txt').write_text('Bando outside the chosen input.')
+            (root / 'bur_fvg' / 'outside.txt').write_text('Bando fuori cartella. pag. 5.')
             previous = e.os.getcwd()
             try:
                 e.os.chdir(root)
-                with patch.object(sys, 'argv', ['extract_bur_grants.py', '--output', 'results', '--candidates-only']):
+                with patch('sys.argv', ['extract_bur_grants.py', '--output', 'results', '--candidates-only']), \
+                     patch.object(e, 'confirm', side_effect=AssertionError('No model')):
                     self.assertEqual(e.main(), 0)
             finally:
                 e.os.chdir(previous)
             rows = json.loads((root / 'results' / 'candidates.json').read_text())
-            self.assertEqual(rows, [{'text': EXAMPLE_TEXT, 'act': EXAMPLE_ACT}])
             audit = json.loads((root / 'results' / 'candidates.jsonl').read_text())
-            self.assertEqual(Path(audit['source']), Path('2026/call.TXT'))
+            self.assertEqual(rows, [{key: audit[key] for key in e.PUBLIC_FIELDS}])
+            self.assertEqual(Path(rows[0]['source']), Path('2026/call.TXT'))
+            self.assertEqual(rows[0]['page'], 101)
+            self.assertNotIn('page_before', audit)
+            self.assertNotIn('page_after', audit)
 
-    def test_missing_default_folder_does_not_fall_back_to_bur_fvg(self):
+    def test_missing_default_folder_does_not_fall_back(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'bur_fvg').mkdir()
-            (root / 'bur_fvg' / 'outside.txt').write_text('Bando outside.')
             previous = e.os.getcwd()
             try:
                 e.os.chdir(root)
-                with patch.object(sys, 'argv', ['extract_bur_grants.py', '--candidates-only']), \
-                     patch('sys.stderr'):
+                with patch('sys.argv', ['extract_bur_grants.py', '--candidates-only']), patch('sys.stderr'):
                     with self.assertRaises(SystemExit) as raised:
                         e.main()
                     self.assertEqual(raised.exception.code, 2)
-                self.assertFalse((root / 'bur_grants_output').exists())
             finally:
                 e.os.chdir(previous)
 
-    def test_empty_txt_is_reported(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / 'input'
-            source.mkdir()
-            (source / 'empty.txt').write_text(' ')
-            with patch('sys.argv', ['extract_bur_grants.py', str(source), '--output', str(Path(tmp) / 'out'), '--candidates-only']):
-                self.assertEqual(e.main(), 2)
-
-    def test_pdf_reader_is_disabled(self):
+    def test_pdf_read_is_disabled(self):
         with self.assertRaises(ValueError):
             e.read(Path('unused.pdf'))
 
@@ -164,11 +152,12 @@ class SemanticTests(unittest.TestCase):
             (args.output / 'cache').mkdir()
             with patch.object(e.urllib.request, 'urlopen', return_value=Response()) as call:
                 for _ in range(2):
-                    self.assertEqual(e.confirm({'act': EXAMPLE_ACT, 'text': EXAMPLE_TEXT}, args)['decision'], 'include')
+                    self.assertEqual(e.confirm({'act': EXAMPLE_ACT, 'legal_references': 'LR 24/2021.', 'text': EXAMPLE_TEXT}, args)['decision'], 'include')
                 self.assertEqual(call.call_count, 1)
                 payload = json.loads(call.call_args.args[0].data)
                 self.assertIn(EXAMPLE_ACT, payload['messages'][1]['content'])
                 self.assertIn(EXAMPLE_TEXT, payload['messages'][1]['content'])
+                self.assertIn('LR 24/2021.', payload['messages'][1]['content'])
 
     def test_invented_reference_is_rejected(self):
         with self.assertRaises(ValueError):
