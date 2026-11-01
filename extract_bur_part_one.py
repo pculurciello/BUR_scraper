@@ -175,6 +175,25 @@ def entries_only(body):
     return body.strip()
 
 
+def summary_entry_lines(body):
+    """One physical line per entry, retaining its terminating pag. N marker."""
+    lines, start = [], 0
+    for locator in PAGE.finditer(body):
+        entry = body[start:locator.end()]
+        # Keep the standalone script compatible with older wrapped TXT:
+        # remove attached word-wrap hyphens, but preserve spaced dashes.
+        entry = entry.replace('\r\n', '\n').replace('\r', '\n')
+        entry = re.sub(r'(?<=\S)[-\u2010\u00ad][^\S\n]*\n\s*', '', entry)
+        entry = entry.replace('\u00ad', '')
+        line = ' '.join(entry.split())
+        if line:
+            lines.append(line)
+        start = locator.end()
+    if body[start:].strip():
+        raise ValueError('Testo residuo senza riferimento pag. N finale: controllare il sommario')
+    return lines
+
+
 def extract_section(text):
     """Fail closed when the summary heading or a reliable end is missing."""
     heading = SUMMARY.search(text)
@@ -211,8 +230,12 @@ def extract_section(text):
         result.update(stato='ambiguous_end', confine='unrecognized_trailing_text')
         return result
     body = entries_only(text[heading.end():last])
-    result.update(stato='ok', testo=body + '\n',
-                  voci=len(locators), inizio=heading.start(), fine=last, confine=boundary)
+    lines = summary_entry_lines(body)
+    if not lines:
+        result['stato'] = 'no_summary_entries'
+        return result
+    result.update(stato='ok', testo='\n'.join(lines) + '\n',
+                  voci=len(lines), inizio=heading.start(), fine=last, confine=boundary)
     return result
 
 
@@ -309,6 +332,7 @@ def main(argv=None):
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
