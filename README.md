@@ -560,7 +560,7 @@ una comprensione semantica: controllare il report, soprattutto per layout insoli
 `estrazione_sezioni.csv` e `estrazione_sezioni.json` riportano per ogni sorgente
 il risultato: `ok`, `section_not_found`, `no_summary_entries`, `ambiguous_end`
 o `error`, gli offset del testo selezionato e il motivo del confine.
-`voci` conta i riferimenti di pagina rilevati ed e indicativo.
+`voci` indica il numero di righe/voce emesse, delimitate dai riferimenti di pagina.
 Un file senza sezione valida non genera un nuovo TXT; un suo eventuale output
 precedente e preservato e segnalato nel report. Il codice di uscita e 2 se ci
 sono file da controllare o nessun TXT selezionato, altrimenti 0.
@@ -655,3 +655,29 @@ Rigenerare dalla directory dei TXT sorgenti:
 ```bash
 python extract_bur_part_one.py bur_fvg --output bur_parte_prima
 ```
+
+
+
+### Una voce di sommario per riga
+
+Ogni riferimento finale `pag. NN` delimita una voce. Dopo la pulizia delle
+intestazioni, tutte le righe della voce vengono riunite in un'unica riga;
+la voce successiva inizia su una nuova riga. Il riferimento alla pagina resta
+alla fine della riga. Esempio:
+
+```text
+Decreto del direttore n. 1. Contributi alle imprese. pag. 20
+Legge regionale n. 2. Disposizioni finanziarie. pag. 21
+```
+
+La regola vale per i TXT legacy e moderni, con a capo originali o gia ripuliti.
+Sono riconosciuti anche `PAG.`, `pag. NN` spezzato fra righe e i riferimenti
+con intervalli o elenchi di pagine. Due voci che rinviano alla stessa pagina
+restano due righe distinte. I trattini di sillabazione attaccati prima di un
+a capo vengono ricomposti; i trattini preceduti da spazio sono conservati.
+Il campo `voci` del report ora corrisponde al numero di righe emesse.
+
+Il riconoscimento assume che i riferimenti `pag. NN` siano i terminatori
+delle voci, come nel sommario; un riferimento dello stesso formato all'interno
+di un titolo verrebbe interpretato come confine. I file sorgenti restano intatti.
+Rigenerare gli output con il comando di estrazione gia usato.
