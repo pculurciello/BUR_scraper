@@ -430,6 +430,29 @@ WRAPPED_WORD = re.compile(
 )
 WORD_SPELLING = re.compile(rf'{WORD}(?:[-\u2010]{WORD})*')
 ROMAN_NUMERAL = re.compile(r'[IVXLCDM]+')
+SPACED_LINE_HYPHEN = re.compile(r'^(.*[^\W\d_])[^\S\n]+([-\u2010][^\S\n]*)$', re.M)
+
+
+def extract_pdf_page_text(page):
+    text = page.extract_text() or ''
+    if not SPACED_LINE_HYPHEN.search(text):
+        return text
+    try:
+        layout = page.extract_text(extraction_mode='layout') or ''
+    except Exception as exc:
+        LOG.debug('Layout PDF non disponibile per la sillabazione: %s', exc)
+        return text
+
+    # Plain extraction sometimes inserts a space before a printed hyphen.
+    # Compare the entire line with the corresponding text in a layout column.
+    layout = '\n'.join(clean(line) for line in layout.splitlines())
+
+    def restore_line(match):
+        line = match.group()
+        attached = match[1] + match[2]
+        return attached if clean(attached) in layout and clean(line) not in layout else line
+
+    return SPACED_LINE_HYPHEN.sub(restore_line, text)
 
 
 def observed_spellings(text):
@@ -582,7 +605,7 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         count = len(reader.pages)
         row['pagine_pdf'] = count
         limit = count if summaries else min(count, legacy_pages)
-        page_texts = [reader.pages[i].extract_text() or '' for i in range(limit)]
+        page_texts = [extract_pdf_page_text(reader.pages[i]) for i in range(limit)]
         evidence = (reader.pages[i].extract_text() or '' for i in range(limit, count))
         text = reflow_pdf_text(page_texts, evidence_pages=evidence)
         pdfpath, txtpath = save_document_files(root, base, url, data, text)
@@ -634,7 +657,7 @@ def convert_existing_pdfs(root, year=None, limit=0):
         try:
             reader = PdfReader(path)
             row['pagine_pdf'] = len(reader.pages)
-            text = reflow_pdf_text([page.extract_text() or '' for page in reader.pages])
+            text = reflow_pdf_text([extract_pdf_page_text(page) for page in reader.pages])
             row['pagine_estratte'] = len(reader.pages)
             if text:
                 temporary = target.with_suffix('.txt.tmp')
