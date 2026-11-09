@@ -569,6 +569,24 @@ class ConversionOnlyTests(unittest.TestCase):
             self.assertFalse((root/'cache/2021/c.txt').exists())
             self.assertFalse((root/'2022/b.txt').exists())
 
+    def test_summary_start_applies_to_legacy_folders_and_filenames_only(self):
+        heading = 'SOMMARIO PARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE'
+        raw = ('Frontespizio.\nSOMMARIO\nPARTE PRIMA\n'
+               'LEGGI, REGOLAMENTI E ATTI DELLA REGIONE\nLegge regionale.')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('2000/bur.pdf', '2006/bur.pdf', 'BUR_legacy_1_2_ordinario.pdf', '2007/bur.pdf'):
+                pdf = root / name
+                pdf.parent.mkdir(parents=True, exist_ok=True)
+                pdf.write_bytes(b'pdf fixture')
+            with patch.object(bur, 'PdfReader', return_value=self.reader([raw])):
+                self.assertEqual(bur.convert_existing_pdfs(root), 0)
+            expected = heading + ' Legge regionale.'
+            self.assertEqual((root/'2000/bur.txt').read_text(), expected)
+            self.assertEqual((root/'2006/bur.txt').read_text(), expected)
+            self.assertEqual((root/'BUR_legacy_1_2_ordinario.txt').read_text(), expected)
+            self.assertEqual((root/'2007/bur.txt').read_text(), 'Frontespizio.\n' + expected)
+
     def test_corrupt_pdf_preserves_txt_and_continues(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -753,6 +771,10 @@ class PdfPageHeaderTests(unittest.TestCase):
 
 
 class LegacyCoverTests(unittest.TestCase):
+    def test_missing_part_one_summary_keeps_text(self):
+        raw = 'Titolo del supplemento.\nSOMMARIO PARTE SECONDA.\nPARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE.'
+        self.assertEqual(bur.reflow_pdf_text([raw], start_at_summary=True), raw)
+
     def test_removes_cover_between_summary_entries(self):
         page = ('Primo decreto.\npag. 2699\r\nSpedizione in abbonamento postale\r\n'
                 'Anno XXXVI - N. 11\r\nNorme in materia d i pubblicità\r\ndegli atti.\r\n'
