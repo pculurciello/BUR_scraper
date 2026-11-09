@@ -686,6 +686,30 @@ class SpacedDashPreservationTests(unittest.TestCase):
                          'Testo - con contributi.\nNuova frase.')
 
 class CorroboratedWordWrapTests(unittest.TestCase):
+    def test_pdf_layout_distinguishes_discretionary_hyphens_from_separators(self):
+        page = Mock()
+        page.extract_text.side_effect = [
+            'Un dossier sepa -\nrato. I mo -\nnitoraggi. Testo -\ncontinuazione.',
+            'Un dossier sepa-     Altra colonna\nrato.     I mo-Altro testo\n'
+            'nitoraggi.     Testo -\ncontinuazione.',
+        ]
+        self.assertEqual(
+            bur.reflow_pdf_text([bur.extract_pdf_page_text(page)]),
+            'Un dossier separato. I monitoraggi. Testo - continuazione.',
+        )
+
+    def test_pdf_layout_keeps_ambiguous_spacing(self):
+        page = Mock()
+        raw = 'Testo -\ncontinuazione.'
+        page.extract_text.side_effect = [raw, 'Testo-\nTesto -\ncontinuazione.']
+        self.assertEqual(bur.extract_pdf_page_text(page), raw)
+
+    def test_pdf_layout_failure_keeps_plain_extraction(self):
+        page = Mock()
+        raw = 'Testo -\ncontinuazione.'
+        page.extract_text.side_effect = [raw, ValueError('layout unavailable')]
+        self.assertEqual(bur.extract_pdf_page_text(page), raw)
+
     def test_spaced_word_wraps_join_and_roman_number_separator_stays(self):
         text = 'Asse I -\nAzione 1.4. Approvazio -\nne dei finanzia -\nmenti.'
         evidence = ['Approvazione dei finanziamenti.']
