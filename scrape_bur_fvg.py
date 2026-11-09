@@ -432,6 +432,14 @@ PDF_PAGE_HEADER = re.compile(
     rf'|{BUR_MASTHEAD} \d+|\d+ {BUR_MASTHEAD})',
     re.I,
 )
+LEGACY_COVER = re.compile(
+    r'^[^\S\n]*Spedizione\s+in\s+abbonamento\s+postale[^\S\n]*\n'
+    r'.*?\bd\s*i\s+pubblicit[àa]\s+degli\s+atti\.'
+    r'(?:\s+La\s+versione\s+integrale\s+dei\s+testi\s+contenuti\s+nel\s+Bollettino\s+Ufficiale\b'
+    r'.*?\bpriv[oa]\s+di\s+valore\s+giuridico\.)?'
+    r'(?:[^\S\n]*\n)?',
+    re.I | re.M | re.S,
+)
 WRAPPED_WORD = re.compile(
     rf'(?P<left>{WORD})(?P<space>[^\S\n]*)(?P<dash>[-\u2010])[^\S\n]*\n\s*'
     rf'(?P<right>{WORD})',
@@ -473,7 +481,9 @@ def observed_spellings(text):
 
 def reflow_pdf_text(page_texts, *, evidence_pages=()):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
-    text = '\n'.join(page_texts).replace('\r\n', '\n').replace('\r', '\n')
+    # The cover can be interleaved with first-page entries in PDF reading order.
+    text = '\n'.join(LEGACY_COVER.sub('', page.replace('\r\n', '\n').replace('\r', '\n'))
+                     for page in page_texts)
     # Remove the whole printed header before joining lines and split words.
     text = '\n'.join(line for line in text.split('\n')
                      if not PDF_PAGE_HEADER.fullmatch(clean(line)))
