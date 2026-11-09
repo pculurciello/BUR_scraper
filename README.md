@@ -479,6 +479,8 @@ Per rigenerare i TXT dei PDF gia scaricati, senza richieste al portale:
 python scrape_bur_fvg.py --convert-only --output bur_fvg
 ```
 
+`--skip-pdf-download` è un alias di `--convert-only` per esportare i TXT dai PDF locali.
+
 La directory deve esistere. Lo script cerca ricorsivamente file `.pdf` (anche
 `.PDF`), salta le directory `cache`, `diagnostics`, `.git`, `.venv` e
 `__pycache__`, ignora i PDF che sono link simbolici e salva il TXT accanto al
@@ -698,3 +700,4 @@ In entrambi gli output l'atto è separato dalla base normativa e dal titolo;
 «Bando regionale. Adozione.» è conservato, senza `pag. 101`. I campi mancanti sono
 segnalati in `parse_warnings`, senza copiarli dalla riga precedente o successiva.
 Schema ed esempio completo nella [guida](docs/GRANT_EXTRACTION.md#campi-di-candidatesjson-e-candidatesjsonl).
+
