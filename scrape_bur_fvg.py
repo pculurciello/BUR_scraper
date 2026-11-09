@@ -440,6 +440,12 @@ LEGACY_COVER = re.compile(
     r'(?:[^\S\n]*\n)?',
     re.I | re.M | re.S,
 )
+LEGACY_YEARS = range(1999, 2007)
+PART_ONE_SUMMARY = re.compile(
+    r'\bSOMMARIO\s+PARTE\s+PRIMA\s+LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*'
+    r'E\s+ATTI\s+DELLA\s+REGIONE\b',
+    re.I,
+)
 WRAPPED_WORD = re.compile(
     rf'(?P<left>{WORD})(?P<space>[^\S\n]*)(?P<dash>[-\u2010])[^\S\n]*\n\s*'
     rf'(?P<right>{WORD})',
@@ -479,7 +485,7 @@ def observed_spellings(text):
             WORD_SPELLING.findall(WRAPPED_WORD.sub(' ', text))}
 
 
-def reflow_pdf_text(page_texts, *, evidence_pages=()):
+def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     # The cover can be interleaved with first-page entries in PDF reading order.
     text = '\n'.join(LEGACY_COVER.sub('', page.replace('\r\n', '\n').replace('\r', '\n'))
@@ -527,6 +533,8 @@ def reflow_pdf_text(page_texts, *, evidence_pages=()):
                   (m.group(2) if ends_sentence(m.group(1)) else ' '), text)
     text = re.sub(r' *\n *', '\n', text)
     text = re.sub(r' +', ' ', text)
+    if start_at_summary and (heading := PART_ONE_SUMMARY.search(text)):
+        text = text[heading.start():]
     return text.strip()
 
 
@@ -629,7 +637,7 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         limit = count if summaries else min(count, legacy_pages)
         page_texts = [extract_pdf_page_text(reader.pages[i]) for i in range(limit)]
         evidence = (reader.pages[i].extract_text() or '' for i in range(limit, count))
-        text = reflow_pdf_text(page_texts, evidence_pages=evidence)
+        text = reflow_pdf_text(page_texts, evidence_pages=evidence, start_at_summary=year in LEGACY_YEARS)
         pdfpath, txtpath = save_document_files(root, base, url, data, text)
         row['pdf'] = pdfpath.relative_to(root).as_posix()
         row['testo'] = txtpath.relative_to(root).as_posix()
@@ -671,6 +679,7 @@ def convert_existing_pdfs(root, year=None, limit=0):
         files = files[:limit]
     fields = ['pdf', 'testo', 'stato', 'pagine_pdf', 'pagine_estratte', 'errore']
     rows = []
+    legacy_folders = {str(year) for year in LEGACY_YEARS}
     for path in files:
         target = path.with_suffix('.txt')
         row = dict(pdf=path.relative_to(root).as_posix(),
@@ -679,7 +688,10 @@ def convert_existing_pdfs(root, year=None, limit=0):
         try:
             reader = PdfReader(path)
             row['pagine_pdf'] = len(reader.pages)
-            text = reflow_pdf_text([extract_pdf_page_text(page) for page in reader.pages])
+            legacy = (path.stem.casefold().startswith('bur_legacy_')
+                      or not legacy_folders.isdisjoint(path.parent.parts))
+            text = reflow_pdf_text([extract_pdf_page_text(page) for page in reader.pages],
+                                   start_at_summary=legacy)
             row['pagine_estratte'] = len(reader.pages)
             if text:
                 temporary = target.with_suffix('.txt.tmp')
