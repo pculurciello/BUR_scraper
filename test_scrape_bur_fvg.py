@@ -725,13 +725,31 @@ class CorroboratedWordWrapTests(unittest.TestCase):
                          'Misure socio-economiche.')
 
     def test_header_between_word_fragments_is_skipped_with_evidence(self):
-        pages = ['Stanziamento di spe -\n2690 - 17/3/1999 BOLLETTINO UFFICIALE DELLA REGIONE AUTONOMA N. 11',
+        pages = ['Stanziamento di spe -\n2690 - 17/3/1999 '
+                 'BOLLETTINO UFFICIALE DELLA REGIONE AUTONOMA FRIULI-VENEZIA GIULIA N. 11',
                  'sa. Previsione della spesa.']
         self.assertEqual(bur.reflow_pdf_text(pages), 'Stanziamento di spesa. Previsione della spesa.')
 
     def test_wrapped_act_identifier_keeps_its_hyphen(self):
         self.assertEqual(bur.reflow_pdf_text(['n. EST. 83-\nD/ESP/4296.']),
                          'n. EST. 83-D/ESP/4296.')
+
+
+class PdfPageHeaderTests(unittest.TestCase):
+    def test_removes_complete_headers_without_touching_bulletin_references(self):
+        masthead = 'Bollettino Ufficiale della Regione Autonoma Friuli-Venezia Giulia'
+        reference = f'Pubblicato nel {masthead} N. 11.'
+        text = (f'Approvazione dei\r\nN. 11\t{masthead} 17/3/1999 - 2691\r\n'
+                f'criteri.\r\n{reference}\r\n'
+                f'2692 - 17/3/1999   {masthead} N. 11\r\nUlteriori disposizioni.')
+        self.assertEqual(bur.reflow_pdf_text([text]),
+                         f'Approvazione dei criteri.\n{reference}\nUlteriori disposizioni.')
+
+    def test_removes_supplement_and_modern_page_headers(self):
+        legacy = '3085Suppl. ord. N. 5 BOLLETTINO UFFICIALE DELLA REGIONE AUTONOMA FRIULI-VENEZIA GIULIA 2/4/1999-'
+        modern = 'bollettino ufficiale della regione autonoma friuli venezia giulia 1 '
+        self.assertEqual(bur.reflow_pdf_text([modern, 'Nuovi contri-', legacy, 'buti.']),
+                         'Nuovi contributi.')
 
 
 if __name__ == '__main__': unittest.main()
