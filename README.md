@@ -449,20 +449,20 @@ Le abbreviazioni comuni (`art.`, `n.`, `D.G.R.`, ecc.) non sono considerate
 una fine di frase. Il riconoscimento resta euristico nei casi ambigui.
 Non vengono aggiunti separatori artificiali `--- Pagina N ---`.
 
-Un trattino `-` a fine riga viene rimosso solo se e attaccato al carattere
-precedente: `contri-` + a capo + ` buti` diventa `contributi`. Vengono rimossi
-anche gli spazi dopo il trattino e l'indentazione della riga successiva,
-compresi gli spazi non separabili Unicode, senza lasciare separatori nella parola.
+Quando un PDF inserisce uno spazio prima del trattino di sillabazione,
+lo script cerca la parola ricomposta in altre occorrenze dello stesso
+fascicolo. Per esempio, `finanzia -` seguito da `menti` diventa
+`finanziamenti` se questa grafia compare nel testo. Per i PDF integrali
+storici, anche le pagine oltre il limite di esportazione possono fornire
+riscontri, mentre il TXT mantiene il limite configurato.
 
-Se invece il trattino e preceduto da whitespace (spazio, tabulazione o
-spazio Unicode), il trattino e la separazione precedente sono conservati:
-`Testo -` + a capo + `continuazione` diventa `Testo - continuazione`.
-Come nel resto della pulizia, sequenze di whitespace orizzontale vengono
-normalizzate a uno spazio, senza eliminare il separatore prima del trattino.
-La stessa regola si applica ai trattini tipografici di sillabazione; i soft
-hyphen restano caratteri discrezionali e vengono rimossi.
-I trattini interni a una riga sono conservati. Le parole spezzate con
-trattino attaccato possono essere ricomposte anche fra due pagine.
+I separatori come `Asse I - Azione`, i composti attestati con trattino e
+gli identificativi spezzati come `83-D/ESP/4296` conservano il trattino.
+I trattini spaziati senza un riscontro restano nel testo. Per i trattini
+attaccati si usa anche la forma dei frammenti, quindi una parola rara o
+un composto senza altre occorrenze possono richiedere una revisione.
+Un'intestazione storica riconosciuta fra due frammenti viene scavalcata
+quando il fascicolo conferma la parola ricomposta.
 
 Questa pulizia non corregge errori OCR, intestazioni gia presenti nel PDF o
 un ordine di lettura errato di colonne; il PDF originale resta il riferimento.
@@ -700,4 +700,5 @@ In entrambi gli output l'atto è separato dalla base normativa e dal titolo;
 «Bando regionale. Adozione.» è conservato, senza `pag. 101`. I campi mancanti sono
 segnalati in `parse_warnings`, senza copiarli dalla riga precedente o successiva.
 Schema ed esempio completo nella [guida](docs/GRANT_EXTRACTION.md#campi-di-candidatesjson-e-candidatesjsonl).
+
 
