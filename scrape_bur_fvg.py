@@ -421,10 +421,19 @@ def ends_sentence(line):
 
 
 WORD = r'[^\W\d_]+'
+BUR_MASTHEAD = r'BOLLETTINO UFFICIALE DELLA REGIONE AUTONOMA FRIULI(?: *[-–‐] *| )VENEZIA GIULIA'
+BUR_ISSUE = r'(?:SUPPL\.? (?:ORD|STRAORD)\.? )?N\.? *\d+'
+BUR_DATE = r'\d{1,2}[/.]\d{1,2}[/.]\d{4}'
+PDF_PAGE_HEADER = re.compile(
+    rf'(?:\d+ *[-–‐] *{BUR_DATE} {BUR_MASTHEAD} {BUR_ISSUE}'
+    rf'|{BUR_ISSUE} {BUR_MASTHEAD} {BUR_DATE} *[-–‐] *\d+'
+    # Some supplements extract the page number before the issue number.
+    rf'|\d+ *{BUR_ISSUE} {BUR_MASTHEAD} {BUR_DATE} *[-–‐]'
+    rf'|{BUR_MASTHEAD} \d+|\d+ {BUR_MASTHEAD})',
+    re.I,
+)
 WRAPPED_WORD = re.compile(
     rf'(?P<left>{WORD})(?P<space>[^\S\n]*)(?P<dash>[-\u2010])[^\S\n]*\n\s*'
-    r'(?P<masthead>(?:\d+|N\.)[^\n]*\bBOLLETTINO[ \t]+UFFICIALE[ \t]+DELLA[ \t]+'
-    r'REGIONE[ \t]+AUTONOMA[^\n]*\n\s*)?'
     rf'(?P<right>{WORD})',
     re.I,
 )
@@ -465,6 +474,9 @@ def observed_spellings(text):
 def reflow_pdf_text(page_texts, *, evidence_pages=()):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     text = '\n'.join(page_texts).replace('\r\n', '\n').replace('\r', '\n')
+    # Remove the whole printed header before joining lines and split words.
+    text = '\n'.join(line for line in text.split('\n')
+                     if not PDF_PAGE_HEADER.fullmatch(clean(line)))
     text = re.sub(r'\u00ad[^\S\n]*\n\s*', '', text)
     if WRAPPED_WORD.search(text):
         spellings = observed_spellings(text)
@@ -481,7 +493,7 @@ def reflow_pdf_text(page_texts, *, evidence_pages=()):
             separator = ROMAN_NUMERAL.fullmatch(left) or (right[0].isupper() and not left.isupper())
             if not compound and not separator and joined.casefold() in spellings:
                 return joined
-            if match['space'] or match['masthead']:
+            if match['space']:
                 return match.group()
             if compound or separator or right.isupper() or {left.casefold(), right.casefold()} <= spellings:
                 return left + match['dash'] + right
