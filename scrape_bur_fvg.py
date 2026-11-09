@@ -615,7 +615,7 @@ def convert_existing_pdfs(root, year=None, limit=0):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--convert-only', action='store_true',
+    ap.add_argument('--convert-only', '--skip-pdf-download', action='store_true',
                     help='Converte solo i PDF gia presenti in --output, senza rete')
     ap.add_argument('--year', type=int, help='Seleziona una sola annualita (imposta --dal e --al)')
     ap.add_argument('--page', type=int, help='Elabora solo questa pagina dei risultati per un singolo anno')
@@ -716,6 +716,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
