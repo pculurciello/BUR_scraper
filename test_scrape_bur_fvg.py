@@ -490,8 +490,8 @@ class PdfTextReflowTests(unittest.TestCase):
         text = bur.reflow_pdf_text(['socio-\neconomico e tecnico-scientifico. '
                                    'FRIULI-\nVENEZIA. COVID-\n19. 1998-\n2003. '
                                    'Titolo -\n nota.'])
-        self.assertEqual(text, 'socioeconomico e tecnico-scientifico. FRIULIVENEZIA. '
-                              'COVID19. 19982003. Titolo - nota.')
+        self.assertEqual(text, 'socioeconomico e tecnico-scientifico. FRIULI-VENEZIA. '
+                              'COVID-19. 1998-2003. Titolo - nota.')
 
     def test_empty_pages_remain_empty(self):
         self.assertEqual(bur.reflow_pdf_text(['', '  \n\t', '']), '')
@@ -640,9 +640,9 @@ class SentenceBoundaryReflowTests(unittest.TestCase):
 
     def test_removes_attached_line_final_hyphens(self):
         cases = [('socio-\neconomico', 'socioeconomico'),
-                 ('FRIULI-\nVENEZIA', 'FRIULIVENEZIA'),
-                 ('1998-\n2003', '19982003'),
-                 ('COVID-  \r\n19', 'COVID19'),
+                 ('FRIULI-\nVENEZIA', 'FRIULI-VENEZIA'),
+                 ('1998-\n2003', '1998-2003'),
+                 ('COVID-  \r\n19', 'COVID-19'),
                  ('a-\nb-\nc', 'abc'),
                  ('tecnico-scientifico', 'tecnico-scientifico')]
         for raw, expected in cases:
@@ -685,7 +685,33 @@ class SpacedDashPreservationTests(unittest.TestCase):
         self.assertEqual(bur.reflow_pdf_text(['Testo -\ncon contri-\nbuti.\nNuova frase.']),
                          'Testo - con contributi.\nNuova frase.')
 
+class CorroboratedWordWrapTests(unittest.TestCase):
+    def test_spaced_word_wraps_join_and_roman_number_separator_stays(self):
+        text = 'Asse I -\nAzione 1.4. Approvazio -\nne dei finanzia -\nmenti.'
+        evidence = ['Approvazione dei finanziamenti.']
+        self.assertEqual(
+            bur.reflow_pdf_text([text], evidence_pages=evidence),
+            'Asse I - Azione 1.4. Approvazione dei finanziamenti.',
+        )
+
+    def test_known_compound_keeps_its_hyphen_even_if_closed_form_occurs(self):
+        text = 'Misure socio-\neconomiche.'
+        evidence = ['Misure socio-economiche e disposizioni socioeconomiche.']
+        self.assertEqual(bur.reflow_pdf_text([text], evidence_pages=evidence),
+                         'Misure socio-economiche.')
+
+    def test_header_between_word_fragments_is_skipped_with_evidence(self):
+        pages = ['Stanziamento di spe -\n2690 - 17/3/1999 BOLLETTINO UFFICIALE DELLA REGIONE AUTONOMA N. 11',
+                 'sa. Previsione della spesa.']
+        self.assertEqual(bur.reflow_pdf_text(pages), 'Stanziamento di spesa. Previsione della spesa.')
+
+    def test_wrapped_act_identifier_keeps_its_hyphen(self):
+        self.assertEqual(bur.reflow_pdf_text(['n. EST. 83-\nD/ESP/4296.']),
+                         'n. EST. 83-D/ESP/4296.')
+
+
 if __name__ == '__main__': unittest.main()
+
 
 
 
