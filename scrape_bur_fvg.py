@@ -420,13 +420,59 @@ def ends_sentence(line):
     return True
 
 
-def reflow_pdf_text(page_texts):
+WORD = r'[^\W\d_]+'
+WRAPPED_WORD = re.compile(
+    rf'(?P<left>{WORD})(?P<space>[^\S\n]*)(?P<dash>[-\u2010])[^\S\n]*\n\s*'
+    r'(?P<masthead>(?:\d+|N\.)[^\n]*\bBOLLETTINO[ \t]+UFFICIALE[ \t]+DELLA[ \t]+'
+    r'REGIONE[ \t]+AUTONOMA[^\n]*\n\s*)?'
+    rf'(?P<right>{WORD})',
+    re.I,
+)
+WORD_SPELLING = re.compile(rf'{WORD}(?:[-\u2010]{WORD})*')
+ROMAN_NUMERAL = re.compile(r'[IVXLCDM]+')
+
+
+def observed_spellings(text):
+    # A fragment at the same line wrap is not independent spelling evidence.
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    return {word.casefold().replace('\u2010', '-') for word in
+            WORD_SPELLING.findall(WRAPPED_WORD.sub(' ', text))}
+
+
+def reflow_pdf_text(page_texts, *, evidence_pages=()):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     text = '\n'.join(page_texts).replace('\r\n', '\n').replace('\r', '\n')
-    # Rejoin only attached line-final hyphens. A hyphen preceded by any
-    # whitespace is a separate dash: preserve it and the preceding separator.
-    # Still discard whitespace after an attached hyphen and on the next line.
-    text = re.sub(r'(?<=\S)[-\u2010\u00ad][^\S\n]*\n\s*', '', text)
+    text = re.sub(r'\u00ad[^\S\n]*\n\s*', '', text)
+    if WRAPPED_WORD.search(text):
+        spellings = observed_spellings(text)
+        try:
+            for page_text in evidence_pages:
+                spellings.update(observed_spellings(page_text))
+        except Exception as exc:
+            LOG.debug('Pagine aggiuntive non disponibili per la sillabazione: %s', exc)
+
+        def unwrap(match):
+            left, right = match['left'], match['right']
+            joined = left + right
+            compound = f'{left}-{right}'.casefold() in spellings
+            separator = ROMAN_NUMERAL.fullmatch(left) or (right[0].isupper() and not left.isupper())
+            if not compound and not separator and joined.casefold() in spellings:
+                return joined
+            if match['space'] or match['masthead']:
+                return match.group()
+            if compound or separator or right.isupper() or {left.casefold(), right.casefold()} <= spellings:
+                return left + match['dash'] + right
+            return joined
+
+        # A word may be split across more than two lines.
+        while True:
+            reflowed = WRAPPED_WORD.sub(unwrap, text)
+            if reflowed == text:
+                break
+            text = reflowed
+    # Keep hyphens in wrapped numeric ranges and identifiers.
+    text = re.sub(r'(?<=[A-Z0-9])([-\u2010])[^\S\n]*\n[^\S\n]*(?=\d|[A-Z]+/)(?![^\n]*\bBOLLETTINO\b)',
+                  r'\1', text, flags=re.I)
     text = text.replace('\u00ad', '')
     text = re.sub(r'[^\S\n]+', ' ', text)
     # Preserve existing line/paragraph separators only after a sentence end;
@@ -537,7 +583,8 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         row['pagine_pdf'] = count
         limit = count if summaries else min(count, legacy_pages)
         page_texts = [reader.pages[i].extract_text() or '' for i in range(limit)]
-        text = reflow_pdf_text(page_texts)
+        evidence = (reader.pages[i].extract_text() or '' for i in range(limit, count))
+        text = reflow_pdf_text(page_texts, evidence_pages=evidence)
         pdfpath, txtpath = save_document_files(root, base, url, data, text)
         row['pdf'] = pdfpath.relative_to(root).as_posix()
         row['testo'] = txtpath.relative_to(root).as_posix()
@@ -716,6 +763,7 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
 
 
 
