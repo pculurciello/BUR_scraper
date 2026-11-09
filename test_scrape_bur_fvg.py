@@ -752,6 +752,30 @@ class PdfPageHeaderTests(unittest.TestCase):
                          'Nuovi contributi.')
 
 
+class LegacyCoverTests(unittest.TestCase):
+    def test_removes_cover_between_summary_entries(self):
+        page = ('Primo decreto.\npag. 2699\r\nSpedizione in abbonamento postale\r\n'
+                'Anno XXXVI - N. 11\r\nNorme in materia d i pubblicità\r\ndegli atti.\r\n'
+                'Secondo decreto.\npag. 2700')
+        self.assertEqual(bur.reflow_pdf_text([page]),
+                         'Primo decreto.\npag. 2699 Secondo decreto.\npag. 2700')
+
+    def test_removes_known_cover_disclaimer_and_rejoins_split_word(self):
+        page = ('Approvazione del piano parti-\nSpedizione in abbonamento postale\n'
+                'Norme in materia di pubblicità degli atti.\n'
+                'La versione integrale dei testi contenuti nel Bollettino Ufficiale '
+                'è consultabile sul sito. La riproduzione è priva di valore giuridico.')
+        self.assertEqual(bur.reflow_pdf_text([page, 'colareggiato.']),
+                         'Approvazione del piano particolareggiato.')
+
+    def test_missing_end_marker_does_not_remove_text_across_pages(self):
+        self.assertEqual(
+            bur.reflow_pdf_text(['Spedizione in abbonamento postale\nAvviso.',
+                                 'Norme in materia di pubblicità degli atti.']),
+            'Spedizione in abbonamento postale Avviso.\nNorme in materia di pubblicità degli atti.',
+        )
+
+
 if __name__ == '__main__': unittest.main()
 
 
