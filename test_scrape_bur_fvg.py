@@ -585,7 +585,7 @@ class ConversionOnlyTests(unittest.TestCase):
             self.assertEqual((root/'2000/bur.txt').read_text(), expected)
             self.assertEqual((root/'2006/bur.txt').read_text(), expected)
             self.assertEqual((root/'BUR_legacy_1_2_ordinario.txt').read_text(), expected)
-            self.assertEqual((root/'2007/bur.txt').read_text(), 'Frontespizio.\n' + expected)
+            self.assertEqual((root/'2007/bur.txt').read_text(), 'Frontespizio.\n' + heading + '\nLegge regionale.')
 
     def test_corrupt_pdf_preserves_txt_and_continues(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -646,11 +646,11 @@ class SentenceBoundaryReflowTests(unittest.TestCase):
 
     def test_abbreviations_do_not_end_sentence(self):
         self.assertEqual(bur.reflow_pdf_text(['Ai sensi dell’art.\n3 e della D.G.R.\nn.\n12.\nLe domande sono aperte.']),
-                         'Ai sensi dell’art. 3 e della D.G.R. n. 12.\nLe domande sono aperte.')
+                         "Ai sensi dell'art. 3 e della D.G.R. n. 12.\nLe domande sono aperte.")
 
     def test_preserves_boundary_after_closing_quote(self):
         self.assertEqual(bur.reflow_pdf_text(['La Regione dice «Procedere.»\nNuova frase.']),
-                         'La Regione dice «Procedere.»\nNuova frase.')
+                         'La Regione dice "Procedere."\nNuova frase.')
 
     def test_preserves_sentence_boundary_across_pages(self):
         self.assertEqual(bur.reflow_pdf_text(['Fine del primo periodo.', 'Inizio del successivo.']),
@@ -754,6 +754,22 @@ class CorroboratedWordWrapTests(unittest.TestCase):
 
 
 class PdfPageHeaderTests(unittest.TestCase):
+    def test_modern_headers_and_summary_headings(self):
+        masthead = 'bollettino ufficiale della regione autonoma friuli venezia giulia'
+        first = f'{masthead} 1\n\x18718 febbraio 2026\nSommario Parte Prima Leggi, regolamenti e atti della\nRegione\nDecreto n. 1\npag. 2'
+        second = f'2\n{masthead}\nSommario Parte Terza Gare, avvisi e concorsi\n18 febbraio 2026 7\nAvviso'
+        third = f'{masthead} \x18 29 gennaio 2008\nSommario parte terza Concorsi e avvisi\nConcorso'
+        self.assertEqual(
+            bur.reflow_pdf_text([first, second, third]).splitlines(),
+            ['Sommario Parte Prima Leggi, regolamenti e atti della Regione', 'Decreto n. 1 pag. 2',
+             'Sommario Parte Terza Gare, avvisi e concorsi', 'Avviso',
+             'Sommario parte terza Concorsi e avvisi', 'Concorso'],
+        )
+
+    def test_ascii_export_removes_controls_and_preserves_readable_punctuation(self):
+        self.assertEqual(bur.reflow_pdf_text(['L’attività\x18 – € 10,00.\x7f\n«Sì».']),
+                         'L\'attivita - EUR 10,00.\n"Si".')
+
     def test_removes_complete_headers_without_touching_bulletin_references(self):
         masthead = 'Bollettino Ufficiale della Regione Autonoma Friuli-Venezia Giulia'
         reference = f'Pubblicato nel {masthead} N. 11.'
@@ -794,7 +810,7 @@ class LegacyCoverTests(unittest.TestCase):
         self.assertEqual(
             bur.reflow_pdf_text(['Spedizione in abbonamento postale\nAvviso.',
                                  'Norme in materia di pubblicità degli atti.']),
-            'Spedizione in abbonamento postale Avviso.\nNorme in materia di pubblicità degli atti.',
+            'Spedizione in abbonamento postale Avviso.\nNorme in materia di pubblicita degli atti.',
         )
 
 
