@@ -17,7 +17,6 @@ import re
 import ssl
 import random
 import time
-import unicodedata
 from collections import deque
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
@@ -442,11 +441,7 @@ MODERN_HEADER_METADATA = re.compile(
     rf'(?:\d+ +|s[os] *\d* *)?{MODERN_HEADER_DATE}(?: *(?:s[os] *)?\d+)?', re.I)
 MODERN_PAGE_HEADER = re.compile(
     rf'(?:\d+ )?{BUR_MASTHEAD}(?: \d+)?(?: {MODERN_HEADER_METADATA.pattern})?', re.I)
-PDF_CONTROLS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
-ASCII_PUNCTUATION = str.maketrans({
-    '’': "'", '‘': "'", '“': '"', '”': '"', '«': '"', '»': '"',
-    '‐': '-', '‑': '-', '–': '-', '—': '-', '−': '-', '€': 'EUR',
-})
+PDF_CONTROLS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b\u2060\ufeff]')
 LEGACY_COVER = re.compile(
     r'^[^\S\n]*Spedizione\s+in\s+abbonamento\s+postale[^\S\n]*\n'
     r'.*?\bd\s*i\s+pubblicit[àa]\s+degli\s+atti\.'
@@ -572,12 +567,18 @@ def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
     text = re.sub(r'(?<=[A-Z0-9])([-\u2010])[^\S\n]*\n[^\S\n]*(?=\d|[A-Z]+/)(?![^\n]*\bBOLLETTINO\b)',
                   r'\1', text, flags=re.I)
     text = text.replace('\u00ad', '')
-    text = re.sub(r'[^\S\n]+', ' ', text)
+    text = re.sub(r'[^\S\n\t]+', ' ', text)
     # Preserve existing line/paragraph separators only after a sentence end;
     # do not insert new boundaries at each dot (dates, abbreviations, etc.).
-    text = re.sub(r'([^\n]*)(\n+)',
-                  lambda m: m.group(1).strip() +
-                  (m.group(2) if ends_sentence(m.group(1)) else ' '), text)
+    def join_line(match):
+        line = match[1].strip(' ')
+        if ends_sentence(line):
+            return line + match[2]
+        if line.endswith('\t') or text[match.end():match.end() + 1] == '\t':
+            return line
+        return line + ' '
+
+    text = re.sub(r'([^\n]*)(\n+)', join_line, text)
     text = re.sub(r' *\n *', '\n', text)
     text = re.sub(r' +', ' ', text)
     if start_at_summary and (heading := PART_ONE_SUMMARY.search(text)):
@@ -589,8 +590,7 @@ def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
             return before + clean(match[0]) + after
 
         text = SUMMARY_HEADINGS.sub(isolate_heading, text)
-    text = unicodedata.normalize('NFKD', text.translate(ASCII_PUNCTUATION))
-    return text.encode('ascii', errors='ignore').decode('ascii').strip()
+    return text.strip(' \n') if text.strip() else ''
 
 
 def save_document_files(root, base, source_url, data, text):
