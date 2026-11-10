@@ -17,6 +17,7 @@ import re
 import ssl
 import random
 import time
+import unicodedata
 from collections import deque
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
@@ -432,6 +433,20 @@ PDF_PAGE_HEADER = re.compile(
     rf'|{BUR_MASTHEAD} \d+|\d+ {BUR_MASTHEAD})',
     re.I,
 )
+MODERN_HEADER_DATE = (
+    r'(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{4}|'
+    r'\d{1,5} *(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|'
+    r'settembre|ottobre|novembre|dicembre) *\d{4})'
+)
+MODERN_HEADER_METADATA = re.compile(
+    rf'(?:\d+ +|s[os] *\d* *)?{MODERN_HEADER_DATE}(?: *(?:s[os] *)?\d+)?', re.I)
+MODERN_PAGE_HEADER = re.compile(
+    rf'(?:\d+ )?{BUR_MASTHEAD}(?: \d+)?(?: {MODERN_HEADER_METADATA.pattern})?', re.I)
+PDF_CONTROLS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
+ASCII_PUNCTUATION = str.maketrans({
+    '’': "'", '‘': "'", '“': '"', '”': '"', '«': '"', '»': '"',
+    '‐': '-', '‑': '-', '–': '-', '—': '-', '−': '-', '€': 'EUR',
+})
 LEGACY_COVER = re.compile(
     r'^[^\S\n]*Spedizione\s+in\s+abbonamento\s+postale[^\S\n]*\n'
     r'.*?\bd\s*i\s+pubblicit[àa]\s+degli\s+atti\.'
@@ -444,6 +459,13 @@ LEGACY_YEARS = range(1999, 2007)
 PART_ONE_SUMMARY = re.compile(
     r'\bSOMMARIO\s+PARTE\s+PRIMA\s+LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*'
     r'E\s+ATTI\s+DELLA\s+REGIONE\b',
+    re.I,
+)
+SUMMARY_HEADINGS = re.compile(
+    rf'[ \t]*(?:{PART_ONE_SUMMARY.pattern}|'
+    r'\bSOMMARIO\s+PARTE\s+(?:'
+    r'SECONDA\s+LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*(?:E\s+)?ATTI\s+DELLO\s+STATO|'
+    r'TERZA\s+(?:CONCORSI\s+E\s+AVVISI|GARE\s*,?\s+AVVISI\s+E\s+CONCORSI))\b)[ \t]*',
     re.I,
 )
 WRAPPED_WORD = re.compile(
@@ -485,10 +507,35 @@ def observed_spellings(text):
             WORD_SPELLING.findall(WRAPPED_WORD.sub(' ', text))}
 
 
+def remove_modern_page_header(page):
+    lines = page.strip('\n').split('\n')
+    # In even pages pypdf can emit the page number on its own line.
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first is None:
+        return page
+    header = first + int(clean(lines[first]).isdigit())
+    if header >= len(lines) or not MODERN_PAGE_HEADER.fullmatch(clean(lines[header])):
+        return page
+    # Sometimes a summary heading is emitted before the date on the same page.
+    if not MODERN_HEADER_METADATA.search(clean(lines[header])):
+        preceding = ''
+        for i in range(header + 1, min(header + 4, len(lines))):
+            line = clean(lines[i])
+            if MODERN_HEADER_METADATA.fullmatch(line):
+                del lines[i]
+                break
+            preceding = clean(preceding + ' ' + line)
+            if preceding and not re.match(r'SOMMARIO\b', preceding, re.I):
+                break
+    del lines[first:header + 1]
+    return '\n'.join(lines)
+
+
 def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     # The cover can be interleaved with first-page entries in PDF reading order.
-    text = '\n'.join(LEGACY_COVER.sub('', page.replace('\r\n', '\n').replace('\r', '\n'))
+    text = '\n'.join(LEGACY_COVER.sub('', remove_modern_page_header(
+        PDF_CONTROLS.sub('', page.replace('\r\n', '\n').replace('\r', '\n'))))
                      for page in page_texts)
     # Remove the whole printed header before joining lines and split words.
     text = '\n'.join(line for line in text.split('\n')
@@ -535,7 +582,15 @@ def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
     text = re.sub(r' +', ' ', text)
     if start_at_summary and (heading := PART_ONE_SUMMARY.search(text)):
         text = text[heading.start():]
-    return text.strip()
+    if not start_at_summary:
+        def isolate_heading(match):
+            before = '' if text[match.start() - 1:match.start()] == '\n' else '\n'
+            after = '' if text[match.end():match.end() + 1] == '\n' else '\n'
+            return before + clean(match[0]) + after
+
+        text = SUMMARY_HEADINGS.sub(isolate_heading, text)
+    text = unicodedata.normalize('NFKD', text.translate(ASCII_PUNCTUATION))
+    return text.encode('ascii', errors='ignore').decode('ascii').strip()
 
 
 def save_document_files(root, base, source_url, data, text):
