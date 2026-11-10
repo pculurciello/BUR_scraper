@@ -474,19 +474,48 @@ ROMAN_NUMERAL = re.compile(r'[IVXLCDM]+')
 SPACED_LINE_HYPHEN = re.compile(r'^(.*[^\W\d_])[^\S\n]+([-\u2010][^\S\n]*)$', re.M)
 
 
-def extract_pdf_page_text(page):
+def restore_summary_heading_order(text, layout):
+    # Use the first body line below each visual heading as its anchor. Keep
+    # the plain extraction's wording and the order of all other lines.
+    for visual in SUMMARY_HEADINGS.finditer(layout):
+        following = next((line for line in layout[visual.end():].splitlines()
+                          if line and not MODERN_HEADER_METADATA.fullmatch(line)), None)
+        if following is None:
+            continue
+        anchors = [line for line in re.finditer(r'[^\n]+', text) if clean(line[0]) == following]
+        headings = [match for match in SUMMARY_HEADINGS.finditer(text)
+                    if clean(match[0]) == clean(visual[0])]
+        if len(anchors) != 1 or len(headings) != 1:
+            continue
+        anchor, heading = anchors[0].start(), headings[0]
+        if heading.start() <= anchor and not text[heading.end():anchor].strip():
+            continue
+        end = heading.end()
+        if text[end:end + 1] == '\n':
+            end += 1
+        remaining = text[:heading.start()] + text[end:]
+        if anchor > heading.start():
+            anchor -= end - heading.start()
+        text = remaining[:anchor] + heading[0].strip() + '\n' + remaining[anchor:]
+    return text
+
+
+def extract_pdf_page_text(page, *, order_headings=False):
     text = page.extract_text() or ''
-    if not SPACED_LINE_HYPHEN.search(text):
+    has_heading = order_headings and SUMMARY_HEADINGS.search(text)
+    if not has_heading and not SPACED_LINE_HYPHEN.search(text):
         return text
     try:
         layout = page.extract_text(extraction_mode='layout') or ''
     except Exception as exc:
-        LOG.debug('Layout PDF non disponibile per la sillabazione: %s', exc)
+        LOG.debug('Layout PDF non disponibile: %s', exc)
         return text
 
     # Plain extraction sometimes inserts a space before a printed hyphen.
     # Compare the entire line with the corresponding text in a layout column.
     layout = '\n'.join(clean(line) for line in layout.splitlines())
+    if has_heading:
+        text = restore_summary_heading_order(text, layout)
 
     def restore_line(match):
         line = match.group()
@@ -691,9 +720,11 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         count = len(reader.pages)
         row['pagine_pdf'] = count
         limit = count if summaries else min(count, legacy_pages)
-        page_texts = [extract_pdf_page_text(reader.pages[i]) for i in range(limit)]
+        legacy = year in LEGACY_YEARS
+        page_texts = [extract_pdf_page_text(reader.pages[i], order_headings=not legacy)
+                      for i in range(limit)]
         evidence = (reader.pages[i].extract_text() or '' for i in range(limit, count))
-        text = reflow_pdf_text(page_texts, evidence_pages=evidence, start_at_summary=year in LEGACY_YEARS)
+        text = reflow_pdf_text(page_texts, evidence_pages=evidence, start_at_summary=legacy)
         pdfpath, txtpath = save_document_files(root, base, url, data, text)
         row['pdf'] = pdfpath.relative_to(root).as_posix()
         row['testo'] = txtpath.relative_to(root).as_posix()
@@ -746,8 +777,8 @@ def convert_existing_pdfs(root, year=None, limit=0):
             row['pagine_pdf'] = len(reader.pages)
             legacy = (path.stem.casefold().startswith('bur_legacy_')
                       or not legacy_folders.isdisjoint(path.parent.parts))
-            text = reflow_pdf_text([extract_pdf_page_text(page) for page in reader.pages],
-                                   start_at_summary=legacy)
+            pages = [extract_pdf_page_text(page, order_headings=not legacy) for page in reader.pages]
+            text = reflow_pdf_text(pages, start_at_summary=legacy)
             row['pagine_estratte'] = len(reader.pages)
             if text:
                 temporary = target.with_suffix('.txt.tmp')
