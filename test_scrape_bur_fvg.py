@@ -754,6 +754,23 @@ class CorroboratedWordWrapTests(unittest.TestCase):
 
 
 class PdfPageHeaderTests(unittest.TestCase):
+    def test_pdf_layout_restores_heading_before_reflow(self):
+        page = Mock()
+        wrapped = ('Sommario parte seconda Leggi, regolamenti, atti dello\n'
+                   'Stato e provvedimenti delle Comunità europee')
+        entry = 'Gazzetta Ufficiale - serie generale n. 1 del 2 gennaio 2007'
+        page.extract_text.side_effect = [f'{entry}\npag. 39\n{wrapped}',
+                                         f'   {wrapped}\n\n  {entry}\n   pag. 39']
+        text = bur.extract_pdf_page_text(page, order_headings=True)
+        self.assertEqual(text.splitlines()[:2], wrapped.splitlines())
+        self.assertEqual(bur.reflow_pdf_text([text]).splitlines(),
+                         [' '.join(wrapped.splitlines()), entry + ' pag. 39'])
+
+    def test_pdf_layout_does_not_guess_when_body_anchor_is_ambiguous(self):
+        heading = 'Sommario parte terza Concorsi e avvisi'
+        raw = f'Avviso\npag. 40\nAvviso\npag. 42\n{heading}'
+        self.assertEqual(bur.restore_summary_heading_order(raw, f'{heading}\nAvviso'), raw)
+
     def test_part_two_heading_keeps_full_title_on_its_own_line(self):
         title = 'Sommario parte seconda Leggi, regolamenti, atti dello Stato'
         for suffix in ('', ' e provvedimenti delle Comunità europee'):
