@@ -459,7 +459,8 @@ PART_ONE_SUMMARY = re.compile(
 SUMMARY_HEADINGS = re.compile(
     rf'[ \t]*(?:{PART_ONE_SUMMARY.pattern}|'
     r'\bSOMMARIO\s+PARTE\s+(?:'
-    r'SECONDA\s+LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*(?:E\s+)?ATTI\s+DELLO\s+STATO|'
+    r'SECONDA\s+LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*(?:E\s+)?ATTI\s+DELLO\s+STATO'
+    r'(?:\s+E\s+PROVVEDIMENTI\s+DELLE\s+COMUNIT[ÀA]\u0300?\s+EUROPEE)?|'
     r'TERZA\s+(?:CONCORSI\s+E\s+AVVISI|GARE\s*,?\s+AVVISI\s+E\s+CONCORSI))\b)[ \t]*',
     re.I,
 )
