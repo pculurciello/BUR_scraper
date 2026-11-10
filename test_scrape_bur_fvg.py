@@ -754,6 +754,16 @@ class CorroboratedWordWrapTests(unittest.TestCase):
 
 
 class PdfPageHeaderTests(unittest.TestCase):
+    def test_part_two_heading_keeps_full_title_on_its_own_line(self):
+        title = 'Sommario parte seconda Leggi, regolamenti, atti dello Stato'
+        for suffix in ('', ' e provvedimenti delle Comunità europee'):
+            with self.subTest(suffix=suffix):
+                heading = title + suffix
+                wrapped = heading.replace('regolamenti, ', 'regolamenti,\n').replace('Comunità ', 'Comunità\n')
+                raw = 'pag. 12\n' + wrapped + '\nAvviso di pubblicazione.'
+                self.assertEqual(bur.reflow_pdf_text([raw]).splitlines(),
+                                 ['pag. 12', heading, 'Avviso di pubblicazione.'])
+
     def test_modern_headers_and_summary_headings(self):
         masthead = 'bollettino ufficiale della regione autonoma friuli venezia giulia'
         first = f'{masthead} 1\n\x18718 febbraio 2026\nSommario Parte Prima Leggi, regolamenti e atti della\nRegione\nDecreto n. 1\npag. 2'
