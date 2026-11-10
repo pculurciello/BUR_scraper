@@ -461,7 +461,7 @@ class PdfTextReflowTests(unittest.TestCase):
     def test_sentence_has_no_layout_or_page_breaks(self):
         text = bur.reflow_pdf_text(['La Regione\nconcede contributi',
                                    'alle imprese.\n\nLa domanda\tva inviata.'])
-        self.assertEqual(text, 'La Regione concede contributi alle imprese.\n\nLa domanda va inviata.')
+        self.assertEqual(text, 'La Regione concede contributi alle imprese.\n\nLa domanda\tva inviata.')
         self.assertNotIn('Pagina', text)
 
     def test_wrapped_words_are_rejoined(self):
@@ -646,11 +646,11 @@ class SentenceBoundaryReflowTests(unittest.TestCase):
 
     def test_abbreviations_do_not_end_sentence(self):
         self.assertEqual(bur.reflow_pdf_text(['Ai sensi dell’art.\n3 e della D.G.R.\nn.\n12.\nLe domande sono aperte.']),
-                         "Ai sensi dell'art. 3 e della D.G.R. n. 12.\nLe domande sono aperte.")
+                         'Ai sensi dell’art. 3 e della D.G.R. n. 12.\nLe domande sono aperte.')
 
     def test_preserves_boundary_after_closing_quote(self):
         self.assertEqual(bur.reflow_pdf_text(['La Regione dice «Procedere.»\nNuova frase.']),
-                         'La Regione dice "Procedere."\nNuova frase.')
+                         'La Regione dice «Procedere.»\nNuova frase.')
 
     def test_preserves_sentence_boundary_across_pages(self):
         self.assertEqual(bur.reflow_pdf_text(['Fine del primo periodo.', 'Inizio del successivo.']),
@@ -679,8 +679,8 @@ class HyphenWhitespaceRegressionTests(unittest.TestCase):
     def test_unicode_whitespace_before_dash_preserves_it(self):
         for space in ['\u00a0', '\u2003', '\u202f', '\t']:
             with self.subTest(space=repr(space)):
-                self.assertEqual(bur.reflow_pdf_text(['contri'+space+'-'+space+'\n'+space+'buti']),
-                                 'contri - buti')
+                expected = 'contri\t-\t\tbuti' if space == '\t' else 'contri - buti'
+                self.assertEqual(bur.reflow_pdf_text(['contri'+space+'-'+space+'\n'+space+'buti']), expected)
 
     def test_spaced_dash_across_pages_is_preserved(self):
         self.assertEqual(bur.reflow_pdf_text(['Le risorse finanzia -  ', '\u00a0menti.\nNuova frase.']),
@@ -766,9 +766,9 @@ class PdfPageHeaderTests(unittest.TestCase):
              'Sommario parte terza Concorsi e avvisi', 'Concorso'],
         )
 
-    def test_ascii_export_removes_controls_and_preserves_readable_punctuation(self):
-        self.assertEqual(bur.reflow_pdf_text(['L’attività\x18 – € 10,00.\x7f\n«Sì».']),
-                         'L\'attivita - EUR 10,00.\n"Si".')
+    def test_export_removes_controls_and_preserves_italian_text_and_tabs(self):
+        raw = '\ufeffL’attività\x18\t– € 10,00.\x7f\r\n\t«Sì», per l’unità\u200b.\t'
+        self.assertEqual(bur.reflow_pdf_text([raw]), 'L’attività\t– € 10,00.\n\t«Sì», per l’unità.\t')
 
     def test_removes_complete_headers_without_touching_bulletin_references(self):
         masthead = 'Bollettino Ufficiale della Regione Autonoma Friuli-Venezia Giulia'
@@ -810,7 +810,7 @@ class LegacyCoverTests(unittest.TestCase):
         self.assertEqual(
             bur.reflow_pdf_text(['Spedizione in abbonamento postale\nAvviso.',
                                  'Norme in materia di pubblicità degli atti.']),
-            'Spedizione in abbonamento postale Avviso.\nNorme in materia di pubblicita degli atti.',
+            'Spedizione in abbonamento postale Avviso.\nNorme in materia di pubblicità degli atti.',
         )
 
 
