@@ -9,6 +9,8 @@ import extract_bur_part_one as s
 HEADER = 'SOMMARIO\nPARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\n'
 ENTRY = 'Decreto del direttore n. 1.\nContributi alle imprese.\npag. 20\n'
 
+DATED_ENTRY = 'Decreto del direttore 17 febbraio 1999, n. 1.\nContributi alle imprese.\npag. 20\n'
+
 class SectionTests(unittest.TestCase):
     def test_modern_summary_only(self):
         text = 'Bollettino ufficiale\n' + HEADER + ENTRY
@@ -87,12 +89,16 @@ class CliTests(unittest.TestCase):
             source, output = root/'input', root/'output'
             path = source/'1999'/'BUR_11_17_03_ordinario.txt'
             path.parent.mkdir(parents=True)
-            original = HEADER+ENTRY+'PARTE TERZA\nAvvisi. pag. 30'
+            original = HEADER+DATED_ENTRY+'PARTE TERZA\nAvvisi. pag. 30'
             path.write_text(original)
             self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
-            extracted = output/path.relative_to(source)
+            extracted = output/path.relative_to(source).with_suffix('')/'0001.xml'
             self.assertTrue(extracted.is_file())
             self.assertEqual(path.read_text(), original)
+            document = s.ET.parse(extracted).getroot()
+            ns = {'fvg': s.FVG_NS}
+            self.assertEqual(document.findtext('fvg:metadati/fvg:data', namespaces=ns), '1999-02-17')
+            self.assertEqual(document.findtext('fvg:metadati/fvg:tipo', namespaces=ns), 'decretoDirettore')
             self.assertNotIn('PARTE TERZA', extracted.read_text())
             report = json.loads((output/'estrazione_sezioni.json').read_text())
             self.assertEqual(report[0]['stato'], 'ok')
@@ -101,9 +107,9 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp)
             output = source/'filtered'
-            (source/'a.txt').write_text(HEADER+ENTRY)
+            (source/'a.txt').write_text(HEADER+DATED_ENTRY)
             (source/'cache').mkdir()
-            (source/'cache/ignored.txt').write_text(HEADER+ENTRY)
+            (source/'cache/ignored.txt').write_text(HEADER+DATED_ENTRY)
             argv = [str(source),'--output',str(output)]
             self.assertEqual(self.run_main(argv), 0)
             self.assertEqual(self.run_main(argv), 0)
@@ -116,12 +122,12 @@ class CliTests(unittest.TestCase):
             for year in [1999, 2000]:
                 path = source/str(year)/'a.txt'
                 path.parent.mkdir(parents=True)
-                path.write_text(HEADER+ENTRY)
+                path.write_text(HEADER+DATED_ENTRY)
             self.assertEqual(self.run_main([str(source),'--year','2000','--output',str(output)]), 0)
-            self.assertTrue((output/'2000/a.txt').is_file())
-            self.assertFalse((output/'1999/a.txt').exists())
+            self.assertTrue((output/'2000/a/0001.xml').is_file())
+            self.assertFalse((output/'1999/a/0001.xml').exists())
             self.assertEqual(self.run_main([str(source/'1999/a.txt'),'--output',str(root/'single')]), 0)
-            self.assertTrue((root/'single/a.txt').is_file())
+            self.assertTrue((root/'single/a/0001.xml').is_file())
 
     def test_missing_section_does_not_create_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -132,6 +138,17 @@ class CliTests(unittest.TestCase):
             self.assertEqual(self.run_main([str(path),'--output',str(output)]), 2)
             self.assertFalse((output/'source.txt').exists())
             self.assertTrue((output/'estrazione_sezioni.csv').exists())
+
+    def test_undated_entry_is_reported_without_inventing_a_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, output = root/'source.txt', root/'out'
+            source.write_text(HEADER + DATED_ENTRY + ENTRY, encoding='utf-8')
+            self.assertEqual(self.run_main([str(source), '--output', str(output)]), 2)
+            self.assertEqual([p.name for p in (output/'source').glob('*.xml')], ['0001.xml'])
+            row = json.loads((output/'estrazione_sezioni.json').read_text())[0]
+            self.assertEqual(row['stato'], 'partial')
+            self.assertEqual(row['voci_da_controllare'][0]['indice'], 2)
 
     def test_rejects_same_input_output(self):
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
