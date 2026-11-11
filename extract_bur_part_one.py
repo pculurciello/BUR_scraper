@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Export one CSV per BUR bulletin with the regional Part One entries.
-Python >=3.10. Dates are ISO 8601 when identifiable and blank otherwise.
+"""Export one XML per BUR bulletin with the regional Part One entries.
+Python >=3.10. Dated acts use FVG Legal Light 1.0.
 """
 from __future__ import annotations
 import argparse
@@ -9,6 +9,7 @@ from datetime import date
 import json
 from pathlib import Path
 import re
+import xml.etree.ElementTree as ET
 
 TITLE = r'LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*E\s+ATTI\s+DELLA\s+REGIONE\b'
 SUMMARY = re.compile(r'\bSOMMARIO\s+PARTE\s+PRIMA\s+' + TITLE, re.I)
@@ -239,7 +240,6 @@ def extract_section(text):
     return result
 
 
-ACT_FIELDS = ('act_type', 'act_date', 'act_title')
 MONTHS = 'gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre novembre dicembre'.split()
 ACT_KIND = re.compile(
     r'^(legge regionale|regolamento|deliberazione|decreto|ordinanza|'
@@ -247,11 +247,11 @@ ACT_KIND = re.compile(
 ACT_HEADER = re.compile(
     rf'(?P<organ>{ACT_KIND.pattern}[^.;:]{{0,160}}?)\s+'
     rf'(?P<date>{DATE})(?![\w/])'
-    r'(?:\s*,?\s*n\.\s*[\w/-]+(?:\.[\w/-]+)*)?'
+    r'(?:\s*,?\s*n\.\s*(?P<number>[\w/-]+(?:\.[\w/-]+)*))?'
     r'\s*\.?\s*', re.I)
 UNDATED_HEADER = re.compile(
     rf'(?P<organ>{ACT_KIND.pattern}[^.;:]{{0,160}}?)\s+n\.\s*'
-    r'[\w/-]+(?:\.[\w/-]+)*\.\s+', re.I)
+    r'(?P<number>[\w/-]+(?:\.[\w/-]+)*)\.\s+', re.I)
 
 
 def act_row(entry):
@@ -283,7 +283,82 @@ def act_row(entry):
         elif act_type == 'Deliberazione' and 'giunta' in organ:
             act_type = 'Deliberazione della Giunta'
     title = summary[header.end():].strip() if header else summary
-    return dict(act_type=act_type, act_date=act_date, act_title=title or summary)
+    return dict(act_type=act_type, act_date=act_date, act_title=title or summary,
+                act_number=header['number'] if header else None,
+                act_organ=header['organ'] if header and act_type not in ('Legge regionale', 'Regolamento') else '')
+
+
+FVG_NS = 'urn:fvg:legal:light:1.0'
+BUR_NS = 'urn:fvg:bur:sommario:1.0'
+ET.register_namespace('fvg', FVG_NS)
+ET.register_namespace('bur', BUR_NS)
+
+OFFICE_HEADER = re.compile(
+    r'^(?P<office>(?:Direzione (?:centrale|regionale)|Servizio)\s+.+?)\s+'
+    r'(?=(?:L\.?\s*R\.?\s*\d+|Legge regionale\s+\d|Variante\s+|Avviso\s+))', re.I)
+LEGAL_BASIS = re.compile(r'^(?:(?:L\.?\s*R\.?|Legge regionale)\s*\d+/\d{4}).*?\.\s+(?=[A-ZÀ-Ý])', re.I)
+CITED_ACT = re.compile(
+    rf'\bdeliberazione\s+consiliare(?:\s+di\s+approvazione)?\s+n\.\s*\d+\s+del\s+{DATE}',
+    re.I)
+CITED_LAW = re.compile(
+    r'\b(?:L\.?\s*R\.?|Legge regionale)\s*\d+/\d{4}\b'
+    r'(?:,\s*art\.\s*\d+(?:,\s*(?:co\.|comma)\s*\d+)?)?', re.I)
+FVG_TYPES = {
+    'Legge regionale': 'leggeRegionale', 'Regolamento': 'regolamento',
+    'Deliberazione della Giunta': 'deliberazioneGiunta',
+    'Decreto del Presidente': 'decretoPresidente',
+    'Decreto del Direttore': 'decretoDirettore', 'Decreto': 'decretoAltro',
+}
+INVALID_XML = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]')
+
+
+def bulletin_xml(entries):
+    root = ET.Element(f'{{{BUR_NS}}}sommario')
+    for index, entry in enumerate(entries, 1):
+        entry = INVALID_XML.sub('', entry)
+        fields = act_row(entry)
+        title = fields['act_title']
+        office = OFFICE_HEADER.match(title)
+        if office:
+            title = title[office.end():]
+            basis = LEGAL_BASIS.match(title)
+            if basis:
+                title = title[basis.end():]
+        namespace = FVG_NS if fields['act_date'] else BUR_NS
+
+        def add(parent, name, value=None, **attrs):
+            child = ET.SubElement(parent, f'{{{namespace}}}{name}', attrs)
+            child.text = value
+            return child
+
+        attrs = {'id': f'atto-{index}'}
+        if namespace == FVG_NS:
+            attrs['versioneSchema'] = '1.0'
+        document = add(root, 'documento' if fields['act_date'] else 'voceSenzaData', **attrs)
+        metadata = add(document, 'metadati')
+        add(metadata, 'tipo', FVG_TYPES.get(fields['act_type'], 'altro'))
+        if fields['act_number']:
+            add(metadata, 'numero', fields['act_number'])
+        if fields['act_date']:
+            add(metadata, 'data', fields['act_date'])
+        add(metadata, 'titolo', title)
+        add(metadata, 'ente', 'Regione Autonoma Friuli Venezia Giulia')
+        organ = office['office'] if office else fields['act_organ']
+        if organ:
+            add(metadata, 'organo', organ)
+        publication = add(metadata, 'pubblicazione')
+        add(publication, 'testata', 'Bollettino Ufficiale della Regione Autonoma Friuli Venezia Giulia')
+        text_id = f'sommario-{index}'
+        add(add(document, 'contenuto'), 'testoLibero', entry, id=text_id)
+        references = sorted([*CITED_LAW.finditer(entry), *CITED_ACT.finditer(entry)], key=lambda match: match.start())
+        if references:
+            citations = add(document, 'citazioni')
+            for number, reference in enumerate(references, 1):
+                citation = add(citations, 'citazione', id=f'citazione-{index}-{number}',
+                               sorgente=text_id, stato='parziale')
+                add(citation, 'testoCitato', reference[0])
+    ET.indent(root)
+    return ET.ElementTree(root)
 
 
 def read_text(path):
@@ -352,7 +427,7 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     rows = []
     for path, relative in files:
-        target = output/relative.with_suffix('.csv')
+        target = output/relative.with_suffix('.xml')
         row = dict(source=relative.as_posix(), output='', stato='', voci=0,
                    inizio='', fine='', confine='', errore='', output_precedente_preservato=False)
         try:
@@ -361,11 +436,8 @@ def main(argv=None):
             row.update(result)
             if row['stato'] == 'ok':
                 target.parent.mkdir(parents=True, exist_ok=True)
-                temporary = target.with_suffix('.csv.tmp')
-                with temporary.open('w', encoding='utf-8', newline='') as stream:
-                    writer = csv.DictWriter(stream, fieldnames=ACT_FIELDS)
-                    writer.writeheader()
-                    writer.writerows(act_row(entry) for entry in text.splitlines())
+                temporary = target.with_suffix('.xml.tmp')
+                bulletin_xml(text.splitlines()).write(temporary, encoding='utf-8', xml_declaration=True)
                 temporary.replace(target)
                 row['output'] = target.relative_to(output).as_posix()
             else:
@@ -377,7 +449,7 @@ def main(argv=None):
     if not rows:
         write_report(output, rows)
     succeeded = sum(row['stato'] == 'ok' for row in rows)
-    print(f'{succeeded}/{len(rows)} CSV prodotti; {len(rows)-succeeded} file da controllare. Report: {output}')
+    print(f'{succeeded}/{len(rows)} XML prodotti; {len(rows)-succeeded} file da controllare. Report: {output}')
     return 0 if rows and succeeded == len(rows) else 2
 
 
