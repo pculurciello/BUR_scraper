@@ -581,11 +581,11 @@ class ConversionOnlyTests(unittest.TestCase):
                 pdf.write_bytes(b'pdf fixture')
             with patch.object(bur, 'PdfReader', return_value=self.reader([raw])):
                 self.assertEqual(bur.convert_existing_pdfs(root), 0)
-            expected = heading + ' Legge regionale.'
+            expected = heading.replace('SOMMARIO ', 'SOMMARIO\n') + '\nLegge regionale.'
             self.assertEqual((root/'2000/bur.txt').read_text(), expected)
             self.assertEqual((root/'2006/bur.txt').read_text(), expected)
             self.assertEqual((root/'BUR_legacy_1_2_ordinario.txt').read_text(), expected)
-            self.assertEqual((root/'2007/bur.txt').read_text(), 'Frontespizio.\n' + heading + '\nLegge regionale.')
+            self.assertEqual((root/'2007/bur.txt').read_text(), 'Frontespizio.\nSommario Parte Prima Leggi, regolamenti e atti della Regione\nLegge regionale.')
 
     def test_corrupt_pdf_preserves_txt_and_continues(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -764,7 +764,7 @@ class PdfPageHeaderTests(unittest.TestCase):
         text = bur.extract_pdf_page_text(page, order_headings=True)
         self.assertEqual(text.splitlines()[:2], wrapped.splitlines())
         self.assertEqual(bur.reflow_pdf_text([text]).splitlines(),
-                         [' '.join(wrapped.splitlines()), entry + ' pag. 39'])
+                         [(' '.join(wrapped.splitlines())).replace('parte seconda', 'Parte Seconda'), entry + ' pag. 39'])
 
     def test_pdf_layout_does_not_guess_when_body_anchor_is_ambiguous(self):
         heading = 'Sommario parte terza Concorsi e avvisi'
@@ -779,18 +779,19 @@ class PdfPageHeaderTests(unittest.TestCase):
                 wrapped = heading.replace('regolamenti, ', 'regolamenti,\n').replace('Comunità ', 'Comunità\n')
                 raw = 'pag. 12\n' + wrapped + '\nAvviso di pubblicazione.'
                 self.assertEqual(bur.reflow_pdf_text([raw]).splitlines(),
-                                 ['pag. 12', heading, 'Avviso di pubblicazione.'])
+                                 ['pag. 12', title.replace('parte seconda', 'Parte Seconda') +
+                                  ' e provvedimenti delle Comunità europee', 'Avviso di pubblicazione.'])
 
     def test_modern_headers_and_summary_headings(self):
         masthead = 'bollettino ufficiale della regione autonoma friuli venezia giulia'
         first = f'{masthead} 1\n\x18718 febbraio 2026\nSommario Parte Prima Leggi, regolamenti e atti della\nRegione\nDecreto n. 1\npag. 2'
         second = f'2\n{masthead}\nSommario Parte Terza Gare, avvisi e concorsi\n18 febbraio 2026 7\nAvviso'
-        third = f'{masthead} \x18 29 gennaio 2008\nSommario parte terza Concorsi e avvisi\nConcorso'
+        third = f'{masthead}\n\x18 29 gennaio 2008\n5\nSommario parte terza Concorsi e avvisi\nConcorso'
         self.assertEqual(
             bur.reflow_pdf_text([first, second, third]).splitlines(),
             ['Sommario Parte Prima Leggi, regolamenti e atti della Regione', 'Decreto n. 1 pag. 2',
-             'Sommario Parte Terza Gare, avvisi e concorsi', 'Avviso',
-             'Sommario parte terza Concorsi e avvisi', 'Concorso'],
+             'Sommario Parte Terza Concorsi e avvisi', 'Avviso',
+             'Sommario Parte Terza Concorsi e avvisi', 'Concorso'],
         )
 
     def test_export_removes_controls_and_preserves_italian_text_and_tabs(self):
@@ -814,6 +815,19 @@ class PdfPageHeaderTests(unittest.TestCase):
 
 
 class LegacyCoverTests(unittest.TestCase):
+    def test_detached_online_notice_and_all_legacy_headings(self):
+        notice = ('La versione integrale dei testi contenuti nel Bollettino è online.\n'
+                  'Il sito ha carattere meramente informativ o ed è, pertanto, priva di valore giuridico.')
+        headings = [
+            'PARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE',
+            'PARTE SECONDA LEGGI, REGOLAMENTI, ATTI DELLO STATO E PROVVEDIMENTI DELLE COMUNITÀ EUROPEE',
+            'PARTE TERZA CONCORSI E AVVISI',
+        ]
+        parts = [heading.replace(' ', '\n', 2) + '\nVoce.' for heading in headings]
+        text = bur.reflow_pdf_text([notice, 'SOMMARIO\n' + '\n'.join(parts)], start_at_summary=True)
+        self.assertEqual(text.splitlines(), ['SOMMARIO', headings[0], 'Voce.',
+                                             headings[1], 'Voce.', headings[2], 'Voce.'])
+
     def test_missing_part_one_summary_keeps_text(self):
         raw = 'Titolo del supplemento.\nSOMMARIO PARTE SECONDA.\nPARTE PRIMA LEGGI, REGOLAMENTI E ATTI DELLA REGIONE.'
         self.assertEqual(bur.reflow_pdf_text([raw], start_at_summary=True), raw)
@@ -829,7 +843,7 @@ class LegacyCoverTests(unittest.TestCase):
         page = ('Approvazione del piano parti-\nSpedizione in abbonamento postale\n'
                 'Norme in materia di pubblicità degli atti.\n'
                 'La versione integrale dei testi contenuti nel Bollettino Ufficiale '
-                'è consultabile sul sito. La riproduzione è priva di valore giuridico.')
+                'è consultabile sul sito. La riproduzione ha carattere meramente informativ o ed è, pertanto, priva di valore giuridico.')
         self.assertEqual(bur.reflow_pdf_text([page, 'colareggiato.']),
                          'Approvazione del piano particolareggiato.')
 
