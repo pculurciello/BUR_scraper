@@ -439,15 +439,20 @@ MODERN_HEADER_DATE = (
 )
 MODERN_HEADER_METADATA = re.compile(
     rf'(?:\d+ +|s[os] *\d* *)?{MODERN_HEADER_DATE}(?: *(?:s[os] *)?\d+)?', re.I)
+MODERN_ISSUE_NUMBER = re.compile(r'(?:s[os] *)?\d{1,3}', re.I)
 MODERN_PAGE_HEADER = re.compile(
     rf'(?:\d+ )?{BUR_MASTHEAD}(?: \d+)?(?: {MODERN_HEADER_METADATA.pattern})?', re.I)
 PDF_CONTROLS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b\u2060\ufeff]')
 LEGACY_COVER = re.compile(
-    r'^[^\S\n]*Spedizione\s+in\s+abbonamento\s+postale[^\S\n]*\n'
+    r'^[^\S\n]*Spedizione\s+in\s+abbonamento\s+postale\b'
     r'.*?\bd\s*i\s+pubblicit[àa]\s+degli\s+atti\.'
-    r'(?:\s+La\s+versione\s+integrale\s+dei\s+testi\s+contenuti\s+nel\s+Bollettino\s+Ufficiale\b'
-    r'.*?\bpriv[oa]\s+di\s+valore\s+giuridico\.)?'
     r'(?:[^\S\n]*\n)?',
+    re.I | re.M | re.S,
+)
+LEGACY_ONLINE_NOTICE = re.compile(
+    r'^[^\S\n]*La\s+versione\s+integrale\s+dei\s+testi\s+contenuti\b'
+    r'.*?\bmeramente\s+informativ\s*o\s+ed\s+è\s*,\s*pertanto\s*,\s*'
+    r'priva\s+di\s+valore\s+giuridico\.(?:[^\S\n]*\n)?',
     re.I | re.M | re.S,
 )
 LEGACY_YEARS = range(1999, 2007)
@@ -464,6 +469,18 @@ SUMMARY_HEADINGS = re.compile(
     r'TERZA\s+(?:CONCORSI\s+E\s+AVVISI|GARE\s*,?\s+AVVISI\s+E\s+CONCORSI))\b)[ \t]*',
     re.I,
 )
+LEGACY_HEADINGS = re.compile(
+    r'[ \t]*\bPARTE\s+(?:'
+    r'PRIMA\s+LEGGI\s*,?\s*REGOLAMENTI\s+E\s+ATTI\s+DELLA\s+REGIONE|'
+    r'SECONDA\s+LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*ATTI\s+DELLO\s+STATO'
+    r'\s+E\s+PROVVEDIMENTI\s+DELLE\s+COMUNIT[ÀA]\u0300?\s+EUROPEE|'
+    r'TERZA\s+CONCORSI\s+E\s+AVVISI)\b(?!\.)[ \t]*',
+)
+SECTION_TITLES = {
+    'PRIMA': 'Leggi, regolamenti e atti della Regione',
+    'SECONDA': 'Leggi, regolamenti, atti dello Stato e provvedimenti delle Comunità europee',
+    'TERZA': 'Concorsi e avvisi',
+}
 WRAPPED_WORD = re.compile(
     rf'(?P<left>{WORD})(?P<space>[^\S\n]*)(?P<dash>[-\u2010])[^\S\n]*\n\s*'
     rf'(?P<right>{WORD})',
@@ -542,11 +559,15 @@ def remove_modern_page_header(page):
     if header >= len(lines) or not MODERN_PAGE_HEADER.fullmatch(clean(lines[header])):
         return page
     # Sometimes a summary heading is emitted before the date on the same page.
-    if not MODERN_HEADER_METADATA.search(clean(lines[header])):
+    header_line = clean(lines[header])
+    if not MODERN_HEADER_METADATA.search(header_line):
         preceding = ''
         for i in range(header + 1, min(header + 4, len(lines))):
             line = clean(lines[i])
             if MODERN_HEADER_METADATA.fullmatch(line):
+                if i + 1 < len(lines) and re.fullmatch(MODERN_HEADER_DATE, line, re.I):
+                    if MODERN_ISSUE_NUMBER.fullmatch(clean(lines[i + 1])):
+                        del lines[i + 1]
                 del lines[i]
                 break
             preceding = clean(preceding + ' ' + line)
@@ -559,9 +580,12 @@ def remove_modern_page_header(page):
 def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     # The cover can be interleaved with first-page entries in PDF reading order.
-    text = '\n'.join(LEGACY_COVER.sub('', remove_modern_page_header(
-        PDF_CONTROLS.sub('', page.replace('\r\n', '\n').replace('\r', '\n'))))
-                     for page in page_texts)
+    pages = []
+    for page in page_texts:
+        page = PDF_CONTROLS.sub('', page.replace('\r\n', '\n').replace('\r', '\n'))
+        page = LEGACY_ONLINE_NOTICE.sub('', LEGACY_COVER.sub('', page))
+        pages.append(remove_modern_page_header(page))
+    text = '\n'.join(pages)
     # Remove the whole printed header before joining lines and split words.
     text = '\n'.join(line for line in text.split('\n')
                      if not PDF_PAGE_HEADER.fullmatch(clean(line)))
@@ -613,13 +637,16 @@ def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
     text = re.sub(r' +', ' ', text)
     if start_at_summary and (heading := PART_ONE_SUMMARY.search(text)):
         text = text[heading.start():]
-    if not start_at_summary:
-        def isolate_heading(match):
-            before = '' if text[match.start() - 1:match.start()] == '\n' else '\n'
-            after = '' if text[match.end():match.end() + 1] == '\n' else '\n'
-            return before + clean(match[0]) + after
+    def isolate_heading(match):
+        before = '' if text[match.start() - 1:match.start()] == '\n' else '\n'
+        after = '' if text[match.end():match.end() + 1] == '\n' else '\n'
+        part = clean(match[0]).upper().split()[1 if start_at_summary else 2]
+        title = f'Parte {part.title()} {SECTION_TITLES[part]}'
+        title = title.upper() if start_at_summary else f'Sommario {title}'
+        return before + title + after
 
-        text = SUMMARY_HEADINGS.sub(isolate_heading, text)
+    headings = LEGACY_HEADINGS if start_at_summary else SUMMARY_HEADINGS
+    text = headings.sub(isolate_heading, text)
     return text.strip(' \n') if text.strip() else ''
 
 
