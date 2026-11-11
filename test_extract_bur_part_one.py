@@ -1,5 +1,4 @@
 import contextlib
-import csv
 import io
 import json
 from pathlib import Path
@@ -93,16 +92,14 @@ class CliTests(unittest.TestCase):
             original = HEADER+DATED_ENTRY+'PARTE TERZA\nAvvisi. pag. 30'
             path.write_text(original)
             self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
-            extracted = output/path.relative_to(source).with_suffix('.csv')
+            extracted = output/path.relative_to(source).with_suffix('.xml')
             self.assertTrue(extracted.is_file())
             self.assertEqual(path.read_text(), original)
-            with extracted.open(encoding='utf-8', newline='') as stream:
-                reader = csv.DictReader(stream)
-                self.assertEqual(reader.fieldnames, ['act_type', 'act_date', 'act_title'])
-                self.assertEqual(list(reader), [{
-                    'act_type': 'Decreto del Direttore', 'act_date': '1999-02-17',
-                    'act_title': 'Contributi alle imprese.',
-                }])
+            root_xml = s.ET.parse(extracted).getroot()
+            ns = {'fvg': s.FVG_NS}
+            self.assertEqual(root_xml.findtext('fvg:documento/fvg:metadati/fvg:data', namespaces=ns), '1999-02-17')
+            self.assertEqual(root_xml.findtext('fvg:documento/fvg:metadati/fvg:titolo', namespaces=ns),
+                             'Contributi alle imprese.')
             report = json.loads((output/'estrazione_sezioni.json').read_text())
             self.assertEqual(report[0]['stato'], 'ok')
 
@@ -127,10 +124,10 @@ class CliTests(unittest.TestCase):
                 path.parent.mkdir(parents=True)
                 path.write_text(HEADER+DATED_ENTRY)
             self.assertEqual(self.run_main([str(source),'--year','2000','--output',str(output)]), 0)
-            self.assertTrue((output/'2000/a.csv').is_file())
-            self.assertFalse((output/'1999/a.csv').exists())
+            self.assertTrue((output/'2000/a.xml').is_file())
+            self.assertFalse((output/'1999/a.xml').exists())
             self.assertEqual(self.run_main([str(source/'1999/a.txt'),'--output',str(root/'single')]), 0)
-            self.assertTrue((root/'single/a.csv').is_file())
+            self.assertTrue((root/'single/a.xml').is_file())
 
     def test_missing_section_does_not_create_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -139,7 +136,7 @@ class CliTests(unittest.TestCase):
             path.write_text('Full legal document without a summary heading.')
             output=root/'out'
             self.assertEqual(self.run_main([str(path),'--output',str(output)]), 2)
-            self.assertFalse((output/'source.csv').exists())
+            self.assertFalse((output/'source.xml').exists())
             self.assertTrue((output/'estrazione_sezioni.csv').exists())
 
     def test_undated_entry_is_written_with_blank_date(self):
@@ -148,12 +145,26 @@ class CliTests(unittest.TestCase):
             source, output = root/'source.txt', root/'out'
             source.write_text(HEADER + DATED_ENTRY + ENTRY, encoding='utf-8')
             self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
-            with (output/'source.csv').open(encoding='utf-8', newline='') as stream:
-                rows = list(csv.DictReader(stream))
-            self.assertEqual(len(rows), 2)
-            self.assertEqual(rows[1], {
-                'act_type': 'Decreto del Direttore', 'act_date': '', 'act_title': 'Contributi alle imprese.',
-            })
+            root_xml = s.ET.parse(output/'source.xml').getroot()
+            self.assertEqual(len(root_xml), 2)
+            undated = root_xml.find(f'{{{s.BUR_NS}}}voceSenzaData')
+            self.assertIsNotNone(undated)
+            self.assertIsNone(undated.find(f'{{{s.BUR_NS}}}metadati/{{{s.BUR_NS}}}data'))
+
+    def test_office_and_cited_resolution_are_separate_from_act_date(self):
+        text = ('Direzione centrale pianificazione territoriale, autonomie locali e sicurezza - '
+                'Servizio pianificazione territoriale regionale LR 5/2007, art. 63, co. 2, '
+                'LR 52/1991, art. 32, co. 9. Variante generale n. 24 al Piano regolatore generale '
+                'comunale del Comune di Forni Avoltri: introduzione di modifiche e conferma di '
+                'esecutività della deliberazione consiliare di approvazione n. 20 del 20 aprile 2009. pag. 20')
+        ns = {'bur': s.BUR_NS}
+        entry = s.bulletin_xml([text]).getroot()[0]
+        self.assertTrue(entry.findtext('bur:metadati/bur:organo', namespaces=ns).endswith('territoriale regionale'))
+        self.assertTrue(entry.findtext('bur:metadati/bur:titolo', namespaces=ns).startswith('Variante generale'))
+        self.assertIsNone(entry.find('bur:metadati/bur:data', ns))
+        citations = entry.findall('bur:citazioni/bur:citazione/bur:testoCitato', ns)
+        self.assertEqual(len(citations), 3)
+        self.assertIn('20 aprile 2009', citations[-1].text)
 
     def test_rejects_same_input_output(self):
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
