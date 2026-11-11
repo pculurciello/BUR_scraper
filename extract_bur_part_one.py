@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""Export acts from the regional Part One summary as FVG Legal Light XML.
-Python >=3.10. Standard library only; no network, PDF conversion or LLM.
-Writes one XML document per dated act. Entries without an identifiable act
-date are listed in the extraction report because the schema requires it.
+"""Export one CSV per BUR bulletin with the regional Part One entries.
+Python >=3.10. Dates are ISO 8601 when identifiable and blank otherwise.
 """
 from __future__ import annotations
 import argparse
@@ -11,8 +9,6 @@ from datetime import date
 import json
 from pathlib import Path
 import re
-from urllib.parse import quote
-import xml.etree.ElementTree as ET
 
 TITLE = r'LEGGI\s*,?\s*REGOLAMENTI\s*,?\s*E\s+ATTI\s+DELLA\s+REGIONE\b'
 SUMMARY = re.compile(r'\bSOMMARIO\s+PARTE\s+PRIMA\s+' + TITLE, re.I)
@@ -243,69 +239,51 @@ def extract_section(text):
     return result
 
 
-FVG_NS = 'urn:fvg:legal:light:1.0'
-ET.register_namespace('', FVG_NS)
+ACT_FIELDS = ('act_type', 'act_date', 'act_title')
 MONTHS = 'gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre novembre dicembre'.split()
+ACT_KIND = re.compile(
+    r'^(legge regionale|regolamento|deliberazione|decreto|ordinanza|'
+    r'determinazione|comunicato|avviso)\b', re.I)
 ACT_HEADER = re.compile(
-    r'^(?P<organ>(?:legge regionale|regolamento|deliberazione|decreto|ordinanza|'
-    r'determinazione|comunicato|avviso)\b[^.;:]{0,160}?)\s+'
+    rf'(?P<organ>{ACT_KIND.pattern}[^.;:]{{0,160}}?)\s+'
     rf'(?P<date>{DATE})(?![\w/])'
-    r'(?:\s*,?\s*n\.\s*(?P<number>[\w/-]+(?:\.[\w/-]+)*))?'
+    r'(?:\s*,?\s*n\.\s*[\w/-]+(?:\.[\w/-]+)*)?'
     r'\s*\.?\s*', re.I)
-XML_INVALID = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')
+UNDATED_HEADER = re.compile(
+    rf'(?P<organ>{ACT_KIND.pattern}[^.;:]{{0,160}}?)\s+n\.\s*'
+    r'[\w/-]+(?:\.[\w/-]+)*\.\s+', re.I)
 
 
-def act_xml(entry, identifier, source):
+def act_row(entry):
     locator = list(PAGE.finditer(entry))[-1]
-    summary = XML_INVALID.sub('', entry[:locator.start()]).strip()
+    summary = entry[:locator.start()].strip()
     header = ACT_HEADER.match(summary)
-    if not header:
-        raise ValueError('Data dell’atto non identificabile nell’intestazione')
-    day, month, year = re.fullmatch(
-        rf'(\d{{1,2}})[./\s]*(\d{{1,2}}|{MONTH})[./\s]*(\d{{4}})',
-        header['date'], re.I,
-    ).groups()
-    month = month.lower()
-    month = int(month) if month.isdigit() else MONTHS.index(month) + 1
-    act_date = date(int(year), month, int(day)).isoformat()
-    organ = header['organ'].strip()
-    kind = organ.casefold()
-    if kind.startswith('legge regionale'):
-        kind = 'leggeRegionale'
-    elif kind.startswith('regolamento'):
-        kind = 'regolamento'
-    elif kind.startswith('deliberazione') and 'giunta' in kind:
-        kind = 'deliberazioneGiunta'
-    elif kind.startswith('decreto'):
-        if re.search(r'\bpresidente\b', kind):
-            kind = 'decretoPresidente'
-        elif re.search(r'\bdirettore\b', kind):
-            kind = 'decretoDirettore'
-        else:
-            kind = 'decretoAltro'
+    act_date = ''
+    if header:
+        day, month, year = re.fullmatch(
+            rf'(\d{{1,2}})[./\s]*(\d{{1,2}}|{MONTH})[./\s]*(\d{{4}})',
+            header['date'], re.I,
+        ).groups()
+        month = int(month) if month.isdigit() else MONTHS.index(month.lower()) + 1
+        try:
+            act_date = date(int(year), month, int(day)).isoformat()
+        except ValueError:
+            pass
     else:
-        kind = 'altro'
-
-    def add(parent, name, value=None, **attributes):
-        node = ET.SubElement(parent, f'{{{FVG_NS}}}{name}', attributes)
-        node.text = value
-        return node
-
-    document = ET.Element(f'{{{FVG_NS}}}documento', id=identifier, versioneSchema='1.0')
-    metadata = add(document, 'metadati')
-    add(metadata, 'tipo', kind)
-    if header['number']:
-        add(metadata, 'numero', header['number'])
-    add(metadata, 'data', act_date)
-    add(metadata, 'titolo', summary[header.end():].strip() or summary)
-    add(metadata, 'ente', 'Regione Autonoma Friuli Venezia Giulia')
-    if kind not in ('leggeRegionale', 'regolamento'):
-        add(metadata, 'organo', organ)
-    add(add(metadata, 'pubblicazione'), 'testata', 'Bollettino Ufficiale della Regione Autonoma Friuli Venezia Giulia')
-    add(metadata, 'fonte', url=quote(source), formato='text/plain')
-    add(add(document, 'contenuto'), 'testoLibero', summary + ' ' + locator[0], id='sommario')
-    ET.indent(document)
-    return ET.ElementTree(document)
+        header = UNDATED_HEADER.match(summary)
+    kind = ACT_KIND.match(summary)
+    act_type = kind[0].capitalize() if kind else ''
+    if kind and header:
+        organ = header['organ'].casefold()
+        if act_type == 'Decreto':
+            if re.search(r'\bpresidente\b', organ):
+                act_type = 'Decreto del Presidente'
+            elif re.search(r'\bdirettore\b', organ):
+                act_type = 'Decreto del Direttore'
+        elif act_type == 'Deliberazione' and 'giunta' in organ:
+            act_type = 'Deliberazione della Giunta'
+    title = summary[header.end():].strip() if header else summary
+    return dict(act_type=act_type, act_date=act_date, act_title=title or summary)
 
 
 def read_text(path):
@@ -337,7 +315,7 @@ def select_files(source, output, year=None):
 
 
 def write_report(output, rows):
-    fields = ['source', 'output', 'stato', 'voci', 'xml_prodotti', 'voci_da_controllare',
+    fields = ['source', 'output', 'stato', 'voci',
               'inizio', 'fine', 'confine', 'errore', 'output_precedente_preservato']
     temporary = output/'estrazione_sezioni.csv.tmp'
     with temporary.open('w', encoding='utf-8-sig', newline='') as stream:
@@ -374,31 +352,22 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     rows = []
     for path, relative in files:
-        target = output/relative.with_suffix('')
+        target = output/relative.with_suffix('.csv')
         row = dict(source=relative.as_posix(), output='', stato='', voci=0,
-                   xml_prodotti=0, voci_da_controllare=[],
                    inizio='', fine='', confine='', errore='', output_precedente_preservato=False)
         try:
             result = extract_section(read_text(path))
             text = result.pop('testo')
             row.update(result)
             if row['stato'] == 'ok':
-                for index, entry in enumerate(text.splitlines(), 1):
-                    try:
-                        tree = act_xml(entry, f'{relative.with_suffix("").as_posix()}-{index}', relative.as_posix())
-                    except ValueError as exc:
-                        row['voci_da_controllare'].append({'indice': index, 'testo': entry, 'errore': str(exc)})
-                        continue
-                    target.mkdir(parents=True, exist_ok=True)
-                    xml_path = target / f'{index:04d}.xml'
-                    temporary = xml_path.with_suffix('.xml.tmp')
-                    tree.write(temporary, encoding='utf-8', xml_declaration=True)
-                    temporary.replace(xml_path)
-                    row['xml_prodotti'] += 1
-                if row['xml_prodotti']:
-                    row['output'] = relative.with_suffix('').as_posix()
-                if row['voci_da_controllare']:
-                    row['stato'] = 'partial' if row['xml_prodotti'] else 'no_act_xml'
+                target.parent.mkdir(parents=True, exist_ok=True)
+                temporary = target.with_suffix('.csv.tmp')
+                with temporary.open('w', encoding='utf-8', newline='') as stream:
+                    writer = csv.DictWriter(stream, fieldnames=ACT_FIELDS)
+                    writer.writeheader()
+                    writer.writerows(act_row(entry) for entry in text.splitlines())
+                temporary.replace(target)
+                row['output'] = target.relative_to(output).as_posix()
             else:
                 row['output_precedente_preservato'] = target.exists()
         except Exception as exc:
@@ -408,8 +377,7 @@ def main(argv=None):
     if not rows:
         write_report(output, rows)
     succeeded = sum(row['stato'] == 'ok' for row in rows)
-    total_xml = sum(row['xml_prodotti'] for row in rows)
-    print(f'{total_xml} XML prodotti da {len(rows)} file; {len(rows)-succeeded} file da controllare. Report: {output}')
+    print(f'{succeeded}/{len(rows)} CSV prodotti; {len(rows)-succeeded} file da controllare. Report: {output}')
     return 0 if rows and succeeded == len(rows) else 2
 
 
