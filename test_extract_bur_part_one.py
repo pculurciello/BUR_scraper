@@ -1,4 +1,5 @@
 import contextlib
+import csv
 import io
 import json
 from pathlib import Path
@@ -92,14 +93,16 @@ class CliTests(unittest.TestCase):
             original = HEADER+DATED_ENTRY+'PARTE TERZA\nAvvisi. pag. 30'
             path.write_text(original)
             self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
-            extracted = output/path.relative_to(source).with_suffix('')/'0001.xml'
+            extracted = output/path.relative_to(source).with_suffix('.csv')
             self.assertTrue(extracted.is_file())
             self.assertEqual(path.read_text(), original)
-            document = s.ET.parse(extracted).getroot()
-            ns = {'fvg': s.FVG_NS}
-            self.assertEqual(document.findtext('fvg:metadati/fvg:data', namespaces=ns), '1999-02-17')
-            self.assertEqual(document.findtext('fvg:metadati/fvg:tipo', namespaces=ns), 'decretoDirettore')
-            self.assertNotIn('PARTE TERZA', extracted.read_text())
+            with extracted.open(encoding='utf-8', newline='') as stream:
+                reader = csv.DictReader(stream)
+                self.assertEqual(reader.fieldnames, ['act_type', 'act_date', 'act_title'])
+                self.assertEqual(list(reader), [{
+                    'act_type': 'Decreto del Direttore', 'act_date': '1999-02-17',
+                    'act_title': 'Contributi alle imprese.',
+                }])
             report = json.loads((output/'estrazione_sezioni.json').read_text())
             self.assertEqual(report[0]['stato'], 'ok')
 
@@ -124,10 +127,10 @@ class CliTests(unittest.TestCase):
                 path.parent.mkdir(parents=True)
                 path.write_text(HEADER+DATED_ENTRY)
             self.assertEqual(self.run_main([str(source),'--year','2000','--output',str(output)]), 0)
-            self.assertTrue((output/'2000/a/0001.xml').is_file())
-            self.assertFalse((output/'1999/a/0001.xml').exists())
+            self.assertTrue((output/'2000/a.csv').is_file())
+            self.assertFalse((output/'1999/a.csv').exists())
             self.assertEqual(self.run_main([str(source/'1999/a.txt'),'--output',str(root/'single')]), 0)
-            self.assertTrue((root/'single/a/0001.xml').is_file())
+            self.assertTrue((root/'single/a.csv').is_file())
 
     def test_missing_section_does_not_create_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -136,19 +139,21 @@ class CliTests(unittest.TestCase):
             path.write_text('Full legal document without a summary heading.')
             output=root/'out'
             self.assertEqual(self.run_main([str(path),'--output',str(output)]), 2)
-            self.assertFalse((output/'source.txt').exists())
+            self.assertFalse((output/'source.csv').exists())
             self.assertTrue((output/'estrazione_sezioni.csv').exists())
 
-    def test_undated_entry_is_reported_without_inventing_a_date(self):
+    def test_undated_entry_is_written_with_blank_date(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source, output = root/'source.txt', root/'out'
             source.write_text(HEADER + DATED_ENTRY + ENTRY, encoding='utf-8')
-            self.assertEqual(self.run_main([str(source), '--output', str(output)]), 2)
-            self.assertEqual([p.name for p in (output/'source').glob('*.xml')], ['0001.xml'])
-            row = json.loads((output/'estrazione_sezioni.json').read_text())[0]
-            self.assertEqual(row['stato'], 'partial')
-            self.assertEqual(row['voci_da_controllare'][0]['indice'], 2)
+            self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
+            with (output/'source.csv').open(encoding='utf-8', newline='') as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1], {
+                'act_type': 'Decreto del Direttore', 'act_date': '', 'act_title': 'Contributi alle imprese.',
+            })
 
     def test_rejects_same_input_output(self):
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
