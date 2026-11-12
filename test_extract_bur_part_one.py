@@ -96,6 +96,7 @@ class CliTests(unittest.TestCase):
             self.assertTrue(extracted.is_file())
             self.assertEqual(path.read_text(), original)
             root_xml = s.ET.parse(extracted).getroot()
+            self.assertEqual(root_xml.tag, f'{{{s.FVG_NS}}}raccoltaAtti')
             ns = {'fvg': s.FVG_NS}
             self.assertEqual(root_xml.findtext('fvg:documento/fvg:metadati/fvg:data', namespaces=ns), '1999-02-17')
             self.assertEqual(root_xml.findtext('fvg:documento/fvg:metadati/fvg:titolo', namespaces=ns),
@@ -147,9 +148,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
             root_xml = s.ET.parse(output/'source.xml').getroot()
             self.assertEqual(len(root_xml), 2)
-            undated = root_xml.find(f'{{{s.BUR_NS}}}voceSenzaData')
+            undated = root_xml.find(f'{{{s.FVG_NS}}}voceSenzaData')
             self.assertIsNotNone(undated)
-            self.assertIsNone(undated.find(f'{{{s.BUR_NS}}}metadati/{{{s.BUR_NS}}}data'))
+            self.assertIsNone(undated.find(f'{{{s.FVG_NS}}}metadati/{{{s.FVG_NS}}}data'))
 
     def test_office_and_cited_resolution_are_separate_from_act_date(self):
         text = ('Direzione centrale pianificazione territoriale, autonomie locali e sicurezza - '
@@ -157,12 +158,12 @@ class CliTests(unittest.TestCase):
                 'LR 52/1991, art. 32, co. 9. Variante generale n. 24 al Piano regolatore generale '
                 'comunale del Comune di Forni Avoltri: introduzione di modifiche e conferma di '
                 'esecutività della deliberazione consiliare di approvazione n. 20 del 20 aprile 2009. pag. 20')
-        ns = {'bur': s.BUR_NS}
+        ns = {'fvg': s.FVG_NS}
         entry = s.bulletin_xml([text]).getroot()[0]
-        self.assertTrue(entry.findtext('bur:metadati/bur:organo', namespaces=ns).endswith('territoriale regionale'))
-        self.assertTrue(entry.findtext('bur:metadati/bur:titolo', namespaces=ns).startswith('Variante generale'))
-        self.assertIsNone(entry.find('bur:metadati/bur:data', ns))
-        citations = entry.findall('bur:citazioni/bur:citazione/bur:testoCitato', ns)
+        self.assertTrue(entry.findtext('fvg:metadati/fvg:organo', namespaces=ns).endswith('territoriale regionale'))
+        self.assertTrue(entry.findtext('fvg:metadati/fvg:titolo', namespaces=ns).startswith('Variante generale'))
+        self.assertIsNone(entry.find('fvg:metadati/fvg:data', ns))
+        citations = entry.findall('fvg:citazioni/fvg:citazione/fvg:testoCitato', ns)
         self.assertEqual(len(citations), 3)
         self.assertIn('20 aprile 2009', citations[-1].text)
 
