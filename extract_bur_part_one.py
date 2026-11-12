@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Export one XML per BUR bulletin with the regional Part One entries.
-Python >=3.10. Dated acts use FVG Legal Light 1.0.
+Python >=3.10. Acts use FVG Legal Light 1.0.
 """
 from __future__ import annotations
 import argparse
@@ -328,16 +328,12 @@ def bulletin_xml(entries):
             basis = LEGAL_BASIS.match(title)
             if basis:
                 title = title[basis.end():]
-        attrs = {'id': f'atto-{index}'}
-        if fields['act_date']:
-            attrs['versioneSchema'] = '1.0'
-        document = add(root, 'documento' if fields['act_date'] else 'voceSenzaData', **attrs)
+        document = add(root, 'documento', id=f'atto-{index}', versioneSchema='1.0')
         metadata = add(document, 'metadati')
         add(metadata, 'tipo', FVG_TYPES.get(fields['act_type'], 'altro'))
         if fields['act_number']:
             add(metadata, 'numero', fields['act_number'])
-        if fields['act_date']:
-            add(metadata, 'data', fields['act_date'])
+        add(metadata, 'data', fields['act_date'])
         add(metadata, 'titolo', title)
         add(metadata, 'ente', 'Regione Autonoma Friuli Venezia Giulia')
         organ = office['office'] if office else fields['act_organ']
