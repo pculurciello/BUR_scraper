@@ -289,9 +289,7 @@ def act_row(entry):
 
 
 FVG_NS = 'urn:fvg:legal:light:1.0'
-BUR_NS = 'urn:fvg:bur:sommario:1.0'
 ET.register_namespace('fvg', FVG_NS)
-ET.register_namespace('bur', BUR_NS)
 
 OFFICE_HEADER = re.compile(
     r'^(?P<office>(?:Direzione (?:centrale|regionale)|Servizio)\s+.+?)\s+'
@@ -313,7 +311,13 @@ INVALID_XML = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]')
 
 
 def bulletin_xml(entries):
-    root = ET.Element(f'{{{BUR_NS}}}sommario')
+    root = ET.Element(f'{{{FVG_NS}}}raccoltaAtti', versioneSchema='1.0')
+
+    def add(parent, name, value=None, **attrs):
+        child = ET.SubElement(parent, f'{{{FVG_NS}}}{name}', attrs)
+        child.text = value
+        return child
+
     for index, entry in enumerate(entries, 1):
         entry = INVALID_XML.sub('', entry)
         fields = act_row(entry)
@@ -324,15 +328,8 @@ def bulletin_xml(entries):
             basis = LEGAL_BASIS.match(title)
             if basis:
                 title = title[basis.end():]
-        namespace = FVG_NS if fields['act_date'] else BUR_NS
-
-        def add(parent, name, value=None, **attrs):
-            child = ET.SubElement(parent, f'{{{namespace}}}{name}', attrs)
-            child.text = value
-            return child
-
         attrs = {'id': f'atto-{index}'}
-        if namespace == FVG_NS:
+        if fields['act_date']:
             attrs['versioneSchema'] = '1.0'
         document = add(root, 'documento' if fields['act_date'] else 'voceSenzaData', **attrs)
         metadata = add(document, 'metadati')
