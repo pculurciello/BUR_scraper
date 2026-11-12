@@ -148,9 +148,11 @@ class CliTests(unittest.TestCase):
             self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
             root_xml = s.ET.parse(output/'source.xml').getroot()
             self.assertEqual(len(root_xml), 2)
-            undated = root_xml.find(f'{{{s.FVG_NS}}}voceSenzaData')
+            undated = root_xml.findall(f'{{{s.FVG_NS}}}documento')[1]
             self.assertIsNotNone(undated)
-            self.assertIsNone(undated.find(f'{{{s.FVG_NS}}}metadati/{{{s.FVG_NS}}}data'))
+            date_element = undated.find(f'{{{s.FVG_NS}}}metadati/{{{s.FVG_NS}}}data')
+            self.assertIsNotNone(date_element)
+            self.assertIsNone(date_element.text)
 
     def test_office_and_cited_resolution_are_separate_from_act_date(self):
         text = ('Direzione centrale pianificazione territoriale, autonomie locali e sicurezza - '
@@ -162,7 +164,7 @@ class CliTests(unittest.TestCase):
         entry = s.bulletin_xml([text]).getroot()[0]
         self.assertTrue(entry.findtext('fvg:metadati/fvg:organo', namespaces=ns).endswith('territoriale regionale'))
         self.assertTrue(entry.findtext('fvg:metadati/fvg:titolo', namespaces=ns).startswith('Variante generale'))
-        self.assertIsNone(entry.find('fvg:metadati/fvg:data', ns))
+        self.assertEqual(entry.findtext('fvg:metadati/fvg:data', namespaces=ns), '')
         citations = entry.findall('fvg:citazioni/fvg:citazione/fvg:testoCitato', ns)
         self.assertEqual(len(citations), 3)
         self.assertIn('20 aprile 2009', citations[-1].text)
