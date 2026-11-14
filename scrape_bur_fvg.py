@@ -404,6 +404,66 @@ def document_basename(root, source_url, document_type, archive_year=None):
     raise ValueError('URL privo di bnum e non appartenente al dettaglio ASP storico')
 
 
+MONTH_NAMES = 'gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre novembre dicembre'.split()
+ITALIAN_DATE = rf'(3[01]|[12]\d|0?[1-9])\s*({"|".join(MONTH_NAMES)})\s*(\d{{4}})'
+
+
+def with_bulletin_header(text, pages, *, url='', path=None, title=''):
+    if not text:
+        return text
+    number = publication_date = None
+    query = dict(parse_qsl(urlsplit(url).query))
+    match = re.fullmatch(r'(\d{4})/(\d{1,2})/(\d{1,2})/(\d+)(?:_\d+)*', query.get('bnum', ''))
+    if match:
+        year, month, day, number = map(int, match.groups())
+        publication_date = datetime(year, month, day)
+    elif path is not None:
+        match = re.match(r'BUR_(\d+)_(\d{2})_(\d{2})_', path.stem, re.I)
+        year = next((part for part in reversed(path.parent.parts) if re.fullmatch(r'\d{4}', part)), None)
+        if match and year:
+            number, day, month = map(int, match.groups())
+            try:
+                publication_date = datetime(int(year), month, day)
+            except ValueError:
+                number = None
+    if publication_date is None:
+        first = PDF_CONTROLS.sub('', pages[0]) if pages else ''
+        issue = re.search(r'\b(?:Anno\s+[IVXLCDM]+\s*[-–]?\s*N\.|S\.[OS]\.\s*N\.)\s*(\d+)', first, re.I)
+        printed_date = re.search(r'\bTrieste,\s*' + ITALIAN_DATE, first, re.I)
+        if issue and printed_date:
+            number = int(issue[1])
+        else:
+            masthead = re.search(
+                r'bollettino\s+ufficiale\s+della\s+regione\s+autonoma\s+'
+                r'friuli(?:\s*[-–‐]\s*|\s+)venezia\s+giulia', first, re.I)
+            if masthead:
+                tail = first[masthead.end():].splitlines()[:2]
+                metadata = clean(' '.join(tail))
+                date_issue = re.match(r'(?:\d+\s+)?' + ITALIAN_DATE + r'\s*(\d+)\b', metadata, re.I)
+                issue_date = re.match(r'(?:\d+\s+)?(?:s[os]\s*)?(\d+?)\s*' + ITALIAN_DATE + r'\b', metadata, re.I)
+                if date_issue:
+                    day, month, year, number = date_issue.groups()
+                    printed_date = (None, day, month, year)
+                elif issue_date:
+                    number, day, month, year = issue_date.groups()
+                    printed_date = (None, day, month, year)
+        if number is None or printed_date is None:
+            issue_date = re.search(r'\b(?:numero|n\.)\s*(\d+)\s*(?:[-–]|del)\s*' + ITALIAN_DATE, title, re.I)
+            if issue_date:
+                number = int(issue_date[1])
+                printed_date = issue_date.groups()
+                printed_date = (None, *printed_date[1:])
+        if printed_date and number is not None:
+            try:
+                publication_date = datetime(int(printed_date[3]), MONTH_NAMES.index(printed_date[2].lower()) + 1,
+                                            int(printed_date[1]))
+            except ValueError:
+                pass
+    number_text = str(int(number)) if number is not None else ''
+    date_text = publication_date.strftime('%d/%m/%Y') if publication_date else ''
+    return f'Bollettino Ufficiale della Regione. Numero: {number_text} Data: {date_text}\n{text}'
+
+
 def ends_sentence(line):
     """Riconosce la punteggiatura finale, escludendo abbreviazioni comuni."""
     tail = line.rstrip().rstrip('"\'»”’)]}').rstrip()
@@ -752,6 +812,7 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
                       for i in range(limit)]
         evidence = (reader.pages[i].extract_text() or '' for i in range(limit, count))
         text = reflow_pdf_text(page_texts, evidence_pages=evidence, start_at_summary=legacy)
+        text = with_bulletin_header(text, page_texts, url=url, title=title)
         pdfpath, txtpath = save_document_files(root, base, url, data, text)
         row['pdf'] = pdfpath.relative_to(root).as_posix()
         row['testo'] = txtpath.relative_to(root).as_posix()
@@ -806,6 +867,9 @@ def convert_existing_pdfs(root, year=None, limit=0):
                       or not legacy_folders.isdisjoint(path.parent.parts))
             pages = [extract_pdf_page_text(page, order_headings=not legacy) for page in reader.pages]
             text = reflow_pdf_text(pages, start_at_summary=legacy)
+            metadata = reader.metadata
+            text = with_bulletin_header(text, pages, path=path,
+                                        title=str(metadata.title or '') if metadata else '')
             row['pagine_estratte'] = len(reader.pages)
             if text:
                 temporary = target.with_suffix('.txt.tmp')
