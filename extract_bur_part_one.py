@@ -424,7 +424,8 @@ def main(argv=None):
         row = dict(source=relative.as_posix(), output='', stato='', voci=0,
                    inizio='', fine='', confine='', errore='', output_precedente_preservato=False)
         try:
-            result = extract_section(read_text(path))
+            source_text = read_text(path)
+            result = extract_section(source_text)
             text = result.pop('testo')
             row.update(result)
             if row['stato'] == 'ok':
@@ -432,6 +433,13 @@ def main(argv=None):
                 temporary = target.with_suffix('.xml.tmp')
                 bulletin_xml(text.splitlines()).write(temporary, encoding='utf-8', xml_declaration=True)
                 temporary.replace(target)
+                header = source_text.partition('\n')[0].rstrip('\r')
+                if not re.fullmatch(r'Bollettino Ufficiale della Regione\. Numero: \d* Data: *(?:\d{2}/\d{2}/\d{4})?', header):
+                    header = 'Bollettino Ufficiale della Regione. Numero:  Data: '
+                text_target = target.with_suffix('.txt')
+                temporary = target.with_suffix('.txt.tmp')
+                temporary.write_text(f'{header}\n{text}', encoding='utf-8')
+                temporary.replace(text_target)
                 row['output'] = target.relative_to(output).as_posix()
             else:
                 row['output_precedente_preservato'] = target.exists()
