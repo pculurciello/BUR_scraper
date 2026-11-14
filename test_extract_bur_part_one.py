@@ -9,8 +9,6 @@ import extract_bur_part_one as s
 HEADER = 'SOMMARIO\nPARTE PRIMA\nLEGGI, REGOLAMENTI E ATTI DELLA REGIONE\n'
 ENTRY = 'Decreto del direttore n. 1.\nContributi alle imprese.\npag. 20\n'
 
-DATED_ENTRY = 'Decreto del direttore 17 febbraio 1999, n. 1.\nContributi alle imprese.\npag. 20\n'
-
 class SectionTests(unittest.TestCase):
     def test_modern_summary_only(self):
         text = 'Bollettino ufficiale\n' + HEADER + ENTRY
@@ -89,18 +87,17 @@ class CliTests(unittest.TestCase):
             source, output = root/'input', root/'output'
             path = source/'1999'/'BUR_11_17_03_ordinario.txt'
             path.parent.mkdir(parents=True)
-            original = HEADER+DATED_ENTRY+'PARTE TERZA\nAvvisi. pag. 30'
+            bulletin_header = 'Bollettino Ufficiale della Regione. Numero: 11 Data: 17/03/1999'
+            original = bulletin_header + '\n' + HEADER+ENTRY+'PARTE TERZA\nAvvisi. pag. 30'
             path.write_text(original)
             self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
-            extracted = output/path.relative_to(source).with_suffix('.xml')
+            extracted = output/path.relative_to(source)
             self.assertTrue(extracted.is_file())
             self.assertEqual(path.read_text(), original)
-            root_xml = s.ET.parse(extracted).getroot()
-            self.assertEqual(root_xml.tag, f'{{{s.FVG_NS}}}raccoltaAtti')
-            ns = {'fvg': s.FVG_NS}
-            self.assertEqual(root_xml.findtext('fvg:documento/fvg:metadati/fvg:data', namespaces=ns), '1999-02-17')
-            self.assertEqual(root_xml.findtext('fvg:documento/fvg:metadati/fvg:titolo', namespaces=ns),
-                             'Contributi alle imprese.')
+            self.assertEqual(extracted.read_text().splitlines(), [
+                bulletin_header, 'Decreto del direttore n. 1. Contributi alle imprese. pag. 20',
+            ])
+            self.assertFalse(extracted.with_suffix('.xml').exists())
             report = json.loads((output/'estrazione_sezioni.json').read_text())
             self.assertEqual(report[0]['stato'], 'ok')
 
@@ -108,9 +105,9 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp)
             output = source/'filtered'
-            (source/'a.txt').write_text(HEADER+DATED_ENTRY)
+            (source/'a.txt').write_text(HEADER+ENTRY)
             (source/'cache').mkdir()
-            (source/'cache/ignored.txt').write_text(HEADER+DATED_ENTRY)
+            (source/'cache/ignored.txt').write_text(HEADER+ENTRY)
             argv = [str(source),'--output',str(output)]
             self.assertEqual(self.run_main(argv), 0)
             self.assertEqual(self.run_main(argv), 0)
@@ -123,12 +120,12 @@ class CliTests(unittest.TestCase):
             for year in [1999, 2000]:
                 path = source/str(year)/'a.txt'
                 path.parent.mkdir(parents=True)
-                path.write_text(HEADER+DATED_ENTRY)
+                path.write_text(HEADER+ENTRY)
             self.assertEqual(self.run_main([str(source),'--year','2000','--output',str(output)]), 0)
-            self.assertTrue((output/'2000/a.xml').is_file())
-            self.assertFalse((output/'1999/a.xml').exists())
+            self.assertTrue((output/'2000/a.txt').is_file())
+            self.assertFalse((output/'1999/a.txt').exists())
             self.assertEqual(self.run_main([str(source/'1999/a.txt'),'--output',str(root/'single')]), 0)
-            self.assertTrue((root/'single/a.xml').is_file())
+            self.assertTrue((root/'single/a.txt').is_file())
 
     def test_missing_section_does_not_create_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -137,37 +134,8 @@ class CliTests(unittest.TestCase):
             path.write_text('Full legal document without a summary heading.')
             output=root/'out'
             self.assertEqual(self.run_main([str(path),'--output',str(output)]), 2)
-            self.assertFalse((output/'source.xml').exists())
+            self.assertFalse((output/'source.txt').exists())
             self.assertTrue((output/'estrazione_sezioni.csv').exists())
-
-    def test_undated_entry_is_written_with_blank_date(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source, output = root/'source.txt', root/'out'
-            source.write_text(HEADER + DATED_ENTRY + ENTRY, encoding='utf-8')
-            self.assertEqual(self.run_main([str(source), '--output', str(output)]), 0)
-            root_xml = s.ET.parse(output/'source.xml').getroot()
-            self.assertEqual(len(root_xml), 2)
-            undated = root_xml.findall(f'{{{s.FVG_NS}}}documento')[1]
-            self.assertIsNotNone(undated)
-            date_element = undated.find(f'{{{s.FVG_NS}}}metadati/{{{s.FVG_NS}}}data')
-            self.assertIsNotNone(date_element)
-            self.assertIsNone(date_element.text)
-
-    def test_office_and_cited_resolution_are_separate_from_act_date(self):
-        text = ('Direzione centrale pianificazione territoriale, autonomie locali e sicurezza - '
-                'Servizio pianificazione territoriale regionale LR 5/2007, art. 63, co. 2, '
-                'LR 52/1991, art. 32, co. 9. Variante generale n. 24 al Piano regolatore generale '
-                'comunale del Comune di Forni Avoltri: introduzione di modifiche e conferma di '
-                'esecutività della deliberazione consiliare di approvazione n. 20 del 20 aprile 2009. pag. 20')
-        ns = {'fvg': s.FVG_NS}
-        entry = s.bulletin_xml([text]).getroot()[0]
-        self.assertTrue(entry.findtext('fvg:metadati/fvg:organo', namespaces=ns).endswith('territoriale regionale'))
-        self.assertTrue(entry.findtext('fvg:metadati/fvg:titolo', namespaces=ns).startswith('Variante generale'))
-        self.assertEqual(entry.findtext('fvg:metadati/fvg:data', namespaces=ns), '')
-        citations = entry.findall('fvg:citazioni/fvg:citazione/fvg:testoCitato', ns)
-        self.assertEqual(len(citations), 3)
-        self.assertIn('20 aprile 2009', citations[-1].text)
 
     def test_rejects_same_input_output(self):
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
@@ -379,7 +347,7 @@ class OneLinePerEntryTests(unittest.TestCase):
     def test_wrapped_page_reference_case_and_ranges(self):
         source = HEADER + 'Decreto n. 1. Contributi. PAG.\n20-21\nLegge n. 2. Risorse. pag. 22, 23'
         self.assert_entry_lines(s.extract_section(source), [
-            'Decreto n. 1. Contributi. PAG. 20-21', 'Legge n. 2. Risorse. pag. 22, 23'])
+            'Decreto n. 1. Contributi. pag. 20-21', 'Legge n. 2. Risorse. pag. 22, 23'])
 
     def test_word_wraps_rejoin_but_spaced_dashes_remain(self):
         source = HEADER+'Decreto n. 1. Contri-\nbuti -\nper le imprese. pag. 20'
