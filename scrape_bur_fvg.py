@@ -504,7 +504,8 @@ MODERN_PAGE_HEADER = re.compile(
     rf'(?:\d+ )?{BUR_MASTHEAD}(?: \d+)?(?: {MODERN_HEADER_METADATA.pattern})?', re.I)
 PDF_CONTROLS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b\u2060\ufeff]')
 LEGACY_COVER = re.compile(
-    r'^[^\S\n]*Spedizione\s+in\s+abbonamento\s+postale\b'
+    r'^[^\S\n]*(?:Spedizione\s+in\s+abbonamento\s+postale|'
+    r'DIREZIONE\s+E\s+REDAZIONE)\b'
     r'.*?\bd\s*i\s+pubblicit[àa]\s+degli\s+atti\.'
     r'(?:[^\S\n]*\n)?',
     re.I | re.M | re.S,
