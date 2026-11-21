@@ -512,7 +512,7 @@ class PdfTextReflowTests(unittest.TestCase):
              patch.object(bur, 'pdf_document_title', return_value=('BUR n. 17', 'pdf_metadata')):
             row = bur.fetch_summary(client, 2020, url, title, Path(tmp), 12)
             self.assertEqual(row['stato'], 'ok')
-            self.assertEqual((Path(tmp)/row['testo']).read_text(), 'La Regione concede contributi alle imprese.')
+            self.assertEqual((Path(tmp)/row['testo']).read_text(), 'Bollettino Ufficiale della Regione. Numero: 17 Data: 08/04/2020\nLa Regione concede contributi alle imprese.')
             for page in reader.pages:
                 page.extract_text.assert_called_once_with()
 
@@ -547,7 +547,7 @@ class ConversionOnlyTests(unittest.TestCase):
                  patch.object(bur.logging, 'FileHandler', return_value=logging.NullHandler()):
                 self.assertEqual(bur.main(), 0)
             network.assert_not_called()
-            self.assertEqual(txt.read_text(), 'La Regione concede contributi alle imprese.')
+            self.assertEqual(txt.read_text(), 'Bollettino Ufficiale della Regione. Numero: 49 Data: 09/12/2021\nLa Regione concede contributi alle imprese.')
             self.assertEqual(index.read_text(), 'original index')
             self.assertEqual(registry.read_text(), 'original registry')
             with (root/'conversione.csv').open(encoding='utf-8-sig', newline='') as f:
@@ -581,11 +581,11 @@ class ConversionOnlyTests(unittest.TestCase):
                 pdf.write_bytes(b'pdf fixture')
             with patch.object(bur, 'PdfReader', return_value=self.reader([raw])):
                 self.assertEqual(bur.convert_existing_pdfs(root), 0)
-            expected = heading.replace('SOMMARIO ', 'SOMMARIO\n') + '\nLegge regionale.'
+            expected = 'Bollettino Ufficiale della Regione. Numero:  Data: \n' + heading.replace('SOMMARIO ', 'SOMMARIO\n') + '\nLegge regionale.'
             self.assertEqual((root/'2000/bur.txt').read_text(), expected)
             self.assertEqual((root/'2006/bur.txt').read_text(), expected)
             self.assertEqual((root/'BUR_legacy_1_2_ordinario.txt').read_text(), expected)
-            self.assertEqual((root/'2007/bur.txt').read_text(), 'Frontespizio.\nSommario Parte Prima Leggi, regolamenti e atti della Regione\nLegge regionale.')
+            self.assertEqual((root/'2007/bur.txt').read_text(), 'Bollettino Ufficiale della Regione. Numero:  Data: \nFrontespizio.\nSommario Parte Prima Leggi, regolamenti e atti della Regione\nLegge regionale.')
 
     def test_corrupt_pdf_preserves_txt_and_continues(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -597,7 +597,7 @@ class ConversionOnlyTests(unittest.TestCase):
                  self.assertLogs(bur.LOG, 'WARNING'):
                 self.assertEqual(bur.convert_existing_pdfs(root), 2)
             self.assertEqual((root/'a.txt').read_text(), 'keep this text')
-            self.assertEqual((root/'b.txt').read_text(), 'new text')
+            self.assertEqual((root/'b.txt').read_text(), 'Bollettino Ufficiale della Regione. Numero:  Data: \nnew text')
 
     def test_no_text_preserves_existing_txt(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -815,6 +815,20 @@ class PdfPageHeaderTests(unittest.TestCase):
 
 
 class LegacyCoverTests(unittest.TestCase):
+    def test_editorial_block_without_postal_heading_is_removed(self):
+        page = ('Prima voce.\npag. 20\nDIREZIONE E\nREDAZIONE: TRIESTE\n'
+                'AMMINISTRAZIONE: SERVIZIO DEL PROVVEDITORATO\n'
+                'Per quanto in esse non previsto si applicano le norme statali o '
+                'regionali in materia d i pubblicità degli atti.\n'
+                'Seconda voce.\npag. 21')
+        self.assertEqual(bur.reflow_pdf_text([page]),
+                         'Prima voce.\npag. 20 Seconda voce.\npag. 21')
+
+    def test_editorial_block_between_wrapped_word_fragments(self):
+        page = ('Piano parti-\nDIREZIONE E REDAZIONE: TRIESTE\n'
+                'Norme regionali in materia di pubblicità degli atti.\ncolareggiato.')
+        self.assertEqual(bur.reflow_pdf_text([page]), 'Piano particolareggiato.')
+
     def test_detached_online_notice_and_all_legacy_headings(self):
         notice = ('La versione integrale dei testi contenuti nel Bollettino è online.\n'
                   'Il sito ha carattere meramente informativ o ed è, pertanto, priva di valore giuridico.')
