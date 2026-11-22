@@ -638,7 +638,8 @@ def remove_modern_page_header(page):
     return '\n'.join(lines)
 
 
-def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
+def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False,
+                    stop_at_second_part_one=False):
     """Unisce gli a capo interni alle frasi e conserva quelli tra periodi."""
     # The cover can be interleaved with first-page entries in PDF reading order.
     pages = []
@@ -708,6 +709,12 @@ def reflow_pdf_text(page_texts, *, evidence_pages=(), start_at_summary=False):
 
     headings = LEGACY_HEADINGS if start_at_summary else SUMMARY_HEADINGS
     text = headings.sub(isolate_heading, text)
+    if stop_at_second_part_one:
+        occurrences = list(re.finditer(
+            r'\bPARTE\s+PRIMA\s+LEGGI\s*,\s*REGOLAMENTI\s+E\s+ATTI\s+DELLA\s+REGIONE\b',
+            text, re.I))
+        if len(occurrences) > 1:
+            text = text[:occurrences[1].start()]
     return text.strip(' \n') if text.strip() else ''
 
 
@@ -812,7 +819,8 @@ def fetch_summary(client, year, url, title, root, legacy_pages):
         page_texts = [extract_pdf_page_text(reader.pages[i], order_headings=not legacy)
                       for i in range(limit)]
         evidence = (reader.pages[i].extract_text() or '' for i in range(limit, count))
-        text = reflow_pdf_text(page_texts, evidence_pages=evidence, start_at_summary=legacy)
+        text = reflow_pdf_text(page_texts, evidence_pages=evidence, start_at_summary=legacy,
+                               stop_at_second_part_one=1999 <= year <= 2002)
         text = with_bulletin_header(text, page_texts, url=url, title=title)
         pdfpath, txtpath = save_document_files(root, base, url, data, text)
         row['pdf'] = pdfpath.relative_to(root).as_posix()
@@ -867,7 +875,14 @@ def convert_existing_pdfs(root, year=None, limit=0):
             legacy = (path.stem.casefold().startswith('bur_legacy_')
                       or not legacy_folders.isdisjoint(path.parent.parts))
             pages = [extract_pdf_page_text(page, order_headings=not legacy) for page in reader.pages]
-            text = reflow_pdf_text(pages, start_at_summary=legacy)
+            bulletin_year = next((int(part) for part in reversed(path.parent.parts)
+                                  if re.fullmatch(r'\d{4}', part)), None)
+            if bulletin_year is None and pages:
+                printed_year = re.search(r'\bTRIESTE,\s*' + ITALIAN_DATE, pages[0], re.I)
+                if printed_year:
+                    bulletin_year = int(printed_year[3])
+            text = reflow_pdf_text(pages, start_at_summary=legacy,
+                                   stop_at_second_part_one=bulletin_year in range(1999, 2003))
             metadata = reader.metadata
             text = with_bulletin_header(text, pages, path=path,
                                         title=str(metadata.title or '') if metadata else '')
