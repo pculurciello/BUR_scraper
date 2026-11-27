@@ -155,3 +155,17 @@ Italia` conserva la separazione. Il registro include
 usato dal programma. La scansione può produrre più richieste e più
 falsi positivi. Controlla i `join` del fascicolo di prova prima di
 eseguire la stessa modalità sull'intero archivio.
+
+### Approvazioni senza riscontro nel vocabolario
+
+Una proposta di vLLM viene applicata solo se la forma ricomposta compare
+nel vocabolario usato dal programma. Il vincolo vale anche in modalità
+`--recover-missing` e per le risposte recuperate dalla cache. Le forme
+che raggiungono la soglia di `--corpus-min` fanno parte del vocabolario
+quando l'opzione è attiva.
+
+Il registro distingue `model_decision` (risposta di vLLM) da `decision`
+(esito applicato). Per un `join` senza riscontro lessicale, `decision`
+è `uncertain` e `blocked_reason` è `joined_form_not_in_vocabulary`.
+Per applicare una ricomposizione valida individuata così, aggiungi la
+forma ricomposta al file del vocabolario e riesegui sui TXT originali.
