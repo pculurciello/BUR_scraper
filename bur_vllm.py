@@ -11,6 +11,8 @@ import re
 import sqlite3
 import sys
 import tempfile
+from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 LETTER = r"[^\W\d_]"
@@ -79,6 +81,23 @@ def payload_for(text, start, stop, spans):
     }
 
 
+class ServerConfigurationError(Exception):
+    """The server rejected the endpoint, model, or credentials."""
+
+
+def completion_url(value):
+    parts = urlsplit(value.strip())
+    if (parts.scheme not in {"http", "https"} or not parts.hostname
+            or parts.username is not None or parts.query or parts.fragment):
+        raise ValueError("use an HTTP(S) server URL without credentials, query, or fragment")
+    path = parts.path.rstrip("/")
+    if not path.endswith("/chat/completions"):
+        if not path:
+            path = "/v1"
+        path += "/chat/completions"
+    return parts._replace(path=path).geturl()
+
+
 def verify(url, model, timeout, payload):
     body = {
         "model": model,
@@ -94,8 +113,27 @@ def verify(url, model, timeout, payload):
     if key := os.environ.get("VLLM_API_KEY"):
         headers["Authorization"] = f"Bearer {key}"
     request = Request(url, json.dumps(body).encode(), headers)
-    with urlopen(request, timeout=timeout) as response:
-        result = json.load(response)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            result = json.load(response)
+    except HTTPError as error:
+        if error.code not in {401, 403, 404}:
+            raise
+        detail = ""
+        with error:
+            try:
+                body = json.loads(error.read(4096))
+                message = body.get("error", body)
+                if isinstance(message, dict):
+                    detail = message.get("message") or message.get("detail") or ""
+            except (ValueError, AttributeError):
+                pass
+        hint = ("Check the chat endpoint and confirm the exact served model ID with GET "
+                + url.rsplit("/chat/completions", 1)[0] + "/models."
+                if error.code == 404 else "Check VLLM_API_KEY and server permissions.")
+        if detail:
+            hint += " Server response: " + " ".join(str(detail).split())[:300]
+        raise ServerConfigurationError(f"HTTP {error.code} from {url} for model {model!r}. {hint}") from error
     decisions = json.loads(result["choices"][0]["message"]["content"])["decisions"]
     expected = {candidate["id"] for candidate in payload["candidates"]}
     if (not isinstance(decisions, dict) or decisions.keys() != expected
@@ -121,12 +159,20 @@ def process(text, vocabulary, args, db, pool):
     edits = []
     audit = []
     work = []
+    checked = False
     for start, stop, spans in groups(text, vocabulary):
         payload = payload_for(text, start, stop, spans)
         key = hashlib.sha256(json.dumps(
             [args.url, args.model, PROMPT, payload], sort_keys=True
         ).encode()).hexdigest()
         row = db.execute("SELECT decisions FROM cache WHERE key = ?", (key,)).fetchone()
+        if row is None and not checked:
+            # Confirm the configuration with real work before queuing requests.
+            decisions = verify(args.url, args.model, args.timeout, payload)
+            row = (json.dumps(decisions),)
+            db.execute("INSERT OR IGNORE INTO cache VALUES (?, ?)", (key, row[0]))
+            db.commit()
+            checked = True
         if row is None and key not in pending:
             pending[key] = pool.submit(verify, args.url, args.model, args.timeout, payload)
         work.append((spans, payload, key, row))
@@ -167,12 +213,17 @@ def main():
     parser.add_argument("output", type=Path, help="separate output directory")
     parser.add_argument("--vocab", type=Path, required=True, help="UTF-8 words, one per line")
     parser.add_argument("--model", required=True, help="served vLLM model name")
-    parser.add_argument("--url", default="http://localhost:8000/v1/chat/completions")
+    parser.add_argument("--url", "--base-url", default=os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
+                        help="server base URL or full chat completions endpoint")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--timeout", type=float, default=90)
     parser.add_argument("--corpus-min", type=int, default=0,
                         help="also use alphabetic forms seen intact at least N times")
     args = parser.parse_args()
+    try:
+        args.url = completion_url(args.url)
+    except ValueError as error:
+        parser.error(str(error))
     root = args.input.resolve()
     output = args.output.resolve()
     if not root.exists() or args.workers < 1 or args.timeout <= 0 or args.corpus_min < 0:
@@ -211,6 +262,9 @@ def main():
                 write_atomic(target, repaired.encode("utf-8"))
                 print(f"{file.name}: {sum(x['decision'] == 'join' for x in audit)} joins, "
                       f"{len(audit)} candidates")
+            except ServerConfigurationError as error:
+                print(f"vLLM: {error}", file=sys.stderr)
+                return 1
             except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
                 failed = True
                 print(f"{file}: {error}", file=sys.stderr)
