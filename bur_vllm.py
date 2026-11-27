@@ -26,32 +26,32 @@ PROMPT = (
     "For each listed id decide join, keep, or uncertain. Join only when deleting "
     "the indicated gap restores the intended single word in context. Preserve "
     "real hyphens, separators, and valid phrases, including names and addresses. "
-    "A joined spelling in the vocabulary is insufficient evidence on its own. "
+    "The proposed joined spelling may be a valid word with a different meaning. "
     "If in doubt choose uncertain. "
     'Return only a JSON object with exactly one key "decisions", whose value maps '
     "each supplied id (as a string) to its decision."
 )
 CHOICES = {"join", "keep", "uncertain"}
-PROTECTED_PAIRS = {("in", "corso")}
 
 
-def candidates(text, vocabulary):
+def candidates(text, vocabulary, attested):
     words = iter(WORD.finditer(text))
     left = next(words, None)
     for right in words:
         gap = text[left.end():right.start()]
         first, second = left[0].casefold(), right[0].casefold()
-        if (GAP.fullmatch(gap) and first + second in vocabulary
-                and (first, second) not in PROTECTED_PAIRS
+        joined = first + second
+        if (GAP.fullmatch(gap) and joined in vocabulary
+                and (attested is None or "-" in gap or joined in attested)
                 and not (first in vocabulary and second in vocabulary)
                 and not ("-" in gap and ROMAN.fullmatch(left[0]))):
             yield left.start(), left.end(), right.start(), right.end()
         left = right
 
 
-def groups(text, vocabulary):
+def groups(text, vocabulary, attested):
     # The spans are sorted. A newline inside a wrap candidate stays in its context.
-    spans = iter(candidates(text, vocabulary))
+    spans = iter(candidates(text, vocabulary, attested))
     span = next(spans, None)
     start = 0
     batch = []
@@ -159,13 +159,13 @@ def write_atomic(path, content):
             temporary.unlink(missing_ok=True)
 
 
-def process(text, vocabulary, args, db, pool):
+def process(text, vocabulary, attested, args, db, pool):
     pending = {}
     edits = []
     audit = []
     work = []
     checked = False
-    for start, stop, spans in groups(text, vocabulary):
+    for start, stop, spans in groups(text, vocabulary, attested):
         payload = payload_for(text, start, stop, spans)
         key = hashlib.sha256(json.dumps(
             [args.url, args.model, PROMPT, payload], sort_keys=True
@@ -244,13 +244,23 @@ def main():
                   if WORD.fullmatch(word := line.strip())}
     if not vocabulary:
         parser.error("the vocabulary is empty")
-    if args.corpus_min:
-        counts = Counter()
-        for file in files:
+    counts = Counter()
+    for file in files:
+        try:
             text = file.read_bytes().decode("utf-8")
-            suspect = {index for a, _, c, _ in candidates(text, vocabulary) for index in (a, c)}
-            counts.update(m[0].casefold() for m in WORD.finditer(text) if m.start() not in suspect)
+        except (OSError, UnicodeError):
+            # The processing pass reports unreadable files individually.
+            continue
+        # Exclude likely fragments before using corpus tokens as evidence.
+        suspect = {index for a, _, c, _ in candidates(text, vocabulary, None)
+                   for index in (a, c)}
+        for match in WORD.finditer(text):
+            word = match[0].casefold()
+            if match.start() not in suspect and (args.corpus_min or word in vocabulary):
+                counts[word] += 1
+    if args.corpus_min:
         vocabulary.update(word for word, count in counts.items() if count >= args.corpus_min)
+    attested = counts
 
     output.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(output / "decisions.sqlite3") as db, ThreadPoolExecutor(args.workers) as pool:
@@ -260,7 +270,7 @@ def main():
             target = output / file.relative_to(parent)
             try:
                 text = file.read_bytes().decode("utf-8")
-                repaired, audit = process(text, vocabulary, args, db, pool)
+                repaired, audit = process(text, vocabulary, attested, args, db, pool)
                 write_atomic(target.with_suffix(target.suffix + ".edits.jsonl"),
                              "".join(json.dumps(row, ensure_ascii=False) + "\n"
                                      for row in audit).encode("utf-8"))
