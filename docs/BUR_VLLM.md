@@ -1,0 +1,78 @@
+# Ricomposizione delle parole spezzate nei TXT BUR
+
+`bur_vllm.py` è un passaggio facoltativo fra l'estrazione del testo dai PDF e
+l'estrazione della Parte Prima. Richiede Python 3.10+ (come il resto del
+repository), TXT in UTF-8 e un server vLLM con endpoint Chat Completions
+compatibile con OpenAI e supporto per il formato di risposta JSON.
+Lo script usa la libreria standard di Python.
+
+## Vocabolario italiano
+
+Prepara un file UTF-8 con una forma alfabetica per riga. Usa forme flesse e
+coniugate, per esempio `attrezzature`, `concessioni`, `approvato` e
+`approvavano`. Lo script confronta direttamente le lettere dei due frammenti
+concatenati con il vocabolario, ignorando maiuscole e minuscole. Se usi
+Hunspell, espandi prima il dizionario `.dic` con le regole del relativo
+file `.aff`. Le forme assenti dal vocabolario vengono saltate.
+
+Con `--corpus-min 3` puoi aggiungere le forme alfabetiche osservate almeno
+tre volte nei TXT in ingresso, escludendo i frammenti dei candidati già
+riconosciuti dal vocabolario. Il valore predefinito `0` disattiva questa
+scansione preliminare.
+
+## Esecuzione
+
+Prova su un singolo fascicolo:
+
+```bash
+python bur_vllm.py bur_fvg/2004/BUR_legacy_510_514_ordinario.txt bur_riparati_prova \
+  --vocab italian_words.txt --model NOME_MODELLO
+```
+
+Per elaborare tutte le sottocartelle:
+
+```bash
+python bur_vllm.py bur_fvg bur_riparati \
+  --vocab italian_words.txt --model NOME_MODELLO \
+  --url http://localhost:8000/v1/chat/completions --workers 4
+
+python extract_bur_part_one.py bur_riparati --output bur_parte_prima
+```
+
+Usa il nome del modello pubblicato dal server vLLM. Imposta la variabile
+d'ambiente `VLLM_API_KEY` se il server richiede autenticazione.
+`--workers` limita le richieste simultanee (predefinito: 4).
+`--timeout` imposta il timeout delle operazioni di rete in secondi
+(predefinito: 90).
+
+La directory di output deve essere separata dall'albero sorgente. La scansione
+di una directory è ricorsiva e conserva i percorsi relativi, per esempio
+`bur_fvg/2004/maggio/bur.txt` diventa `bur_riparati/2004/maggio/bur.txt`.
+
+## Candidati, output e riesecuzione
+
+Lo script propone coppie alfabetiche separate da spazi, da un trattino con
+spazi o da un trattino a fine riga. Per esempio, propone `conc essione`
+e `attrez - zature` se il vocabolario contiene `concessione` e
+`attrezzature`. Invia i candidati insieme al periodo individuato da
+punteggiatura e a capo. Il server risponde con `join`, `keep` o `uncertain`
+per ciascun candidato. Lo script applica soltanto i `join` validati e
+mantiene il testo originale per le altre decisioni e per le unioni
+sovrapposte. I frammenti numerici e le parole divise in più di due parti
+esulano da questo passaggio.
+
+- I TXT corretti sono copie dei sorgenti.
+- Ogni file `.txt.edits.jsonl` registra i candidati, la forma proposta, la
+  decisione e gli offset nel TXT sorgente. Gli offset contano caratteri,
+  partono da zero e indicano un intervallo con estremo finale escluso.
+- `decisions.sqlite3` conserva le decisioni validate in base al contesto,
+  ai candidati, all'endpoint, al nome del modello e al prompt. Una
+  riesecuzione con la stessa directory riusa le decisioni disponibili.
+  Se sostituisci il modello sul server mantenendo lo stesso nome, usa una
+  nuova directory di output per rivalutare i candidati.
+- Se una richiesta fallisce o restituisce decisioni non valide, il file
+  corrente non viene riscritto. L'elaborazione prosegue con gli altri file
+  e termina con codice 1. Esegui di nuovo lo stesso comando per riprovare.
+
+Prima di elaborare l'intero archivio, confronta alcuni TXT corretti con gli
+originali. Controlla sia le unioni errate sia le parole spezzate ancora presenti.
