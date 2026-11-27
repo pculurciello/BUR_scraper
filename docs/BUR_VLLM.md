@@ -80,17 +80,26 @@ originali. Controlla sia le unioni errate sia le parole spezzate ancora presenti
 ## Come evitare unioni errate
 
 La forma ricomposta deve essere nel vocabolario, e almeno un frammento
-deve esserne assente. Se i frammenti sono separati solo da spazi,
-la forma ricomposta deve comparire anche come parola intera nei TXT sorgenti.
-Il programma raccoglie queste occorrenze con una scansione preliminare,
-anche quando `--corpus-min` è disattivato. Con un trattino di sillabazione
-la corrispondenza nel vocabolario basta per proporre la coppia a vLLM,
-purché almeno un frammento sia assente.
+deve esserne assente. Per un'unione con soli spazi, serve almeno una delle
+seguenti condizioni:
 
-La regola vale per tutte le coppie. Per esempio, `in corso` viene
-conservato se entrambi i frammenti sono nel vocabolario oppure se
-`incorso` manca come parola intera nei TXT. Un termine presente
-solo in forma spezzata può restare da correggere.
+- entrambi i frammenti hanno almeno tre lettere;
+- la forma ricomposta compare anche come parola intera nei TXT sorgenti.
+
+Il programma raccoglie le occorrenze con una scansione preliminare,
+anche quando `--corpus-min` è disattivato. Un trattino di sillabazione
+consente di proporre la coppia a vLLM senza queste due condizioni.
+
+Questa regola consente di valutare `tecnolo gico` anche se `tecnologico`
+compare nel vocabolario ma manca come parola intera nei TXT. Per
+`in corso`, la presenza di entrambi i frammenti nel vocabolario blocca
+la proposta; la forma breve `in` richiederebbe comunque un'occorrenza
+intera di `incorso` nei TXT. Per i nomi propri e le forme flesse assenti
+dal vocabolario, aggiungi la grafia intera al file passato a `--vocab`.
+
+Il registro contiene solo le coppie che hanno superato il filtro. Una
+coppia assente dal registro non è stata valutata da vLLM; una coppia con
+decisione `uncertain` è stata valutata e resta separata.
 
 Per correggere le unioni prodotte da una versione precedente, riesegui lo
 script sui TXT originali, per esempio da `bur_fvg` verso `repaired`.
