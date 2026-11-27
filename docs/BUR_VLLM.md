@@ -76,3 +76,28 @@ esulano da questo passaggio.
 
 Prima di elaborare l'intero archivio, confronta alcuni TXT corretti con gli
 originali. Controlla sia le unioni errate sia le parole spezzate ancora presenti.
+
+## HTTP 404 da vLLM
+
+Un HTTP 404 nella richiesta indica che il server ha risposto. Può mancare
+il percorso Chat Completions, oppure il nome dato a `--model` può essere
+diverso dall'identificativo pubblicato da vLLM.
+
+Per un server locale, verifica gli identificativi pubblicati:
+
+```powershell
+curl.exe http://localhost:8000/v1/models
+```
+
+Se il server richiede autenticazione, aggiungi
+`-H "Authorization: Bearer $env:VLLM_API_KEY"`. Copia il valore esatto
+di `data[].id` in `--model` e usa `--url http://localhost:8000/v1`.
+Puoi indicare anche l'URL completo `http://localhost:8000/v1/chat/completions`.
+`--base-url` è un alias di `--url`. In assenza di un argomento esplicito
+viene usato `VLLM_BASE_URL`, se impostato. Se il server è dietro un proxy,
+includi nell'URL il prefisso configurato per l'API.
+
+Con HTTP 401, 403 o 404 il programma interrompe l'elaborazione e mostra
+l'endpoint, il modello e l'eventuale messaggio restituito dal server.
+La prima richiesta non in cache di ogni file viene effettuata prima di
+accodare le altre. I file già completati e la cache restano disponibili.
