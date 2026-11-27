@@ -131,3 +131,22 @@ Con HTTP 401, 403 o 404 il programma interrompe l'elaborazione e mostra
 l'endpoint, il modello e l'eventuale messaggio restituito dal server.
 La prima richiesta non in cache di ogni file viene effettuata prima di
 accodare le altre. I file già completati e la cache restano disponibili.
+
+## Recupero delle parole escluse dal filtro
+
+Se il registro omette molte parole spezzate, esegui una prova su un
+fascicolo sorgente con `--recover-missing`:
+
+```bash
+python bur_vllm.py bur_fvg/2004/BUR_legacy_510_514_ordinario.txt repaired_review \
+  --vocab italian_words.txt --model NOME_MODELLO --recover-missing
+```
+
+Questa modalità chiede a vLLM di valutare anche le coppie con supporto
+lessicale o di corpus insufficiente, come una forma flessa assente dal
+vocabolario o un frammento di una sola lettera. Esclude ancora le coppie
+i cui due frammenti sono entrambi nel vocabolario. Il registro include
+`in_vocabulary` per indicare se la forma ricomposta è nel vocabolario
+usato dal programma. La scansione può produrre più richieste e più
+falsi positivi. Controlla i `join` del fascicolo di prova prima di
+eseguire la stessa modalità sull'intero archivio.
