@@ -16,6 +16,13 @@ tutti i fascicoli, senza escludere supplementi ordinari o straordinari.
 Non enumera numeri presunti e non deduplica per solo numero: un supplemento e
 un bollettino ordinario possono avere lo stesso numero.
 
+## Ricomposizione delle parole spezzate
+
+Per riparare parole come `conc essione` e `attrez - zature` nei TXT già
+estratti, usa il passaggio facoltativo `bur_vllm.py` prima dell'estrazione
+della Parte Prima. La [guida alla ricomposizione](docs/BUR_VLLM.md) descrive
+il vocabolario, la scansione delle sottocartelle e il collegamento a vLLM.
+
 ## File prodotti
 
 - `fascicoli.csv` e `fascicoli.json`: un record per fascicolo, con titolo, URL,
