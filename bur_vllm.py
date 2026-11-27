@@ -32,7 +32,12 @@ PROMPT = (
     "When in_vocabulary is false, join only if the surrounding Italian makes "
     "the single word or name clear and the separated reading is implausible. "
     "A rare or unknown token may be a valid word, surname, abbreviation, or place. "
-    "If in doubt choose uncertain. "
+    "Compare the sentence with original and joined substituted at the specified "
+    "offsets. Both fragments can be valid words and still be a split in this context. "
+    "Choose join only when the joined reading is clearly more probable, keep when "
+    "the original reading fits better, and uncertain when both fit similarly. "
+    "For example, join 'in tanto' in 'In tanto possiamo iniziare', but keep it "
+    "in 'in tanto lavoro'. "
     'Return only a JSON object with exactly one key "decisions", whose value maps '
     "each supplied id (as a string) to its decision."
 )
@@ -53,9 +58,12 @@ def candidates(text, vocabulary, attested, recover_missing=False):
         )
         # A vocabulary miss can be an inflection or a name. Review these only
         # in the opt-in pass, with the weaker evidence exposed to the model.
-        fallback = recover_missing and (hyphenated or len(joined) >= 4)
-        if (GAP.fullmatch(gap) and (dictionary_match or fallback)
-                and not (first in vocabulary and second in vocabulary)
+        both_known = first in vocabulary and second in vocabulary
+        if both_known:
+            eligible = recover_missing and (joined in vocabulary or joined in (attested or ()))
+        else:
+            eligible = dictionary_match or (recover_missing and (hyphenated or len(joined) >= 4))
+        if (GAP.fullmatch(gap) and eligible
                 and not (hyphenated and ROMAN.fullmatch(left[0]))):
             yield left.start(), left.end(), right.start(), right.end()
         left = right
@@ -239,7 +247,7 @@ def main():
     parser.add_argument("--corpus-min", type=int, default=0,
                         help="also use alphabetic forms seen intact at least N times")
     parser.add_argument("--recover-missing", action="store_true",
-                        help="also ask vLLM to review possible joins without dictionary or corpus support")
+                        help="review vocabulary misses and pairs with two plausible readings")
     args = parser.parse_args()
     try:
         args.url = completion_url(args.url)
