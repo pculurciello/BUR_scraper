@@ -53,8 +53,8 @@ di una directory è ricorsiva e conserva i percorsi relativi, per esempio
 
 Lo script propone coppie alfabetiche separate da spazi, da un trattino con
 spazi o da un trattino a fine riga. Per esempio, propone `conc essione`
-e `attrez - zature` se il vocabolario contiene `concessione` e
-`attrezzature`. Invia i candidati insieme al periodo individuato da
+e `attrez - zature` se soddisfano i criteri descritti sotto. Invia i
+candidati insieme al periodo individuato da
 punteggiatura e a capo. Il server risponde con `join`, `keep` o `uncertain`
 per ciascun candidato. Lo script applica soltanto i `join` validati e
 mantiene il testo originale per le altre decisioni e per le unioni
@@ -79,12 +79,18 @@ originali. Controlla sia le unioni errate sia le parole spezzate ancora presenti
 
 ## Come evitare unioni errate
 
-Un candidato deve avere almeno un frammento assente dal vocabolario.
-Se entrambe le forme sono presenti, lo script conserva la separazione.
-La sequenza `in corso` è protetta esplicitamente anche con vocabolari
-incompleti, per esempio in `illuminazione in corso Italia`. Il filtro
-può lasciare qualche parola spezzata quando entrambe le parti sono
-anche parole valide.
+La forma ricomposta deve essere nel vocabolario, e almeno un frammento
+deve esserne assente. Se i frammenti sono separati solo da spazi,
+la forma ricomposta deve comparire anche come parola intera nei TXT sorgenti.
+Il programma raccoglie queste occorrenze con una scansione preliminare,
+anche quando `--corpus-min` è disattivato. Con un trattino di sillabazione
+la corrispondenza nel vocabolario basta per proporre la coppia a vLLM,
+purché almeno un frammento sia assente.
+
+La regola vale per tutte le coppie. Per esempio, `in corso` viene
+conservato se entrambi i frammenti sono nel vocabolario oppure se
+`incorso` manca come parola intera nei TXT. Un termine presente
+solo in forma spezzata può restare da correggere.
 
 Per correggere le unioni prodotte da una versione precedente, riesegui lo
 script sui TXT originali, per esempio da `bur_fvg` verso `repaired`.
