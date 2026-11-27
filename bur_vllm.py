@@ -212,19 +212,27 @@ def process(text, vocabulary, attested, args, db, pool):
             decisions = json.loads(row[0])
         selected = Counter(
             index for span, candidate in zip(spans, payload["candidates"])
-            if decisions[candidate["id"]] == "join"
+            if decisions[candidate["id"]] == "join" and candidate["in_vocabulary"]
             for index in (span[0], span[2])
         )
         for span, candidate in zip(spans, payload["candidates"]):
             a, b, c, d = span
-            decision = decisions[candidate["id"]]
-            if decision == "join" and (selected[a] > 1 or selected[c] > 1):
-                decision = "uncertain"
-            if decision == "join":
-                edits.append((b, c))
+            model_decision = decisions[candidate["id"]]
+            decision = model_decision
+            blocked_reason = None
+            if model_decision == "join":
+                if not candidate["in_vocabulary"]:
+                    blocked_reason = "joined_form_not_in_vocabulary"
+                elif selected[a] > 1 or selected[c] > 1:
+                    blocked_reason = "overlapping_joins"
+                if blocked_reason:
+                    decision = "uncertain"
+                else:
+                    edits.append((b, c))
             audit.append({"start": a, "end": d, "original": candidate["original"],
                           "joined": candidate["joined"], "in_vocabulary": candidate["in_vocabulary"],
-                          "decision": decision})
+                          "model_decision": model_decision, "decision": decision,
+                          "blocked_reason": blocked_reason})
     pieces = []
     start = 0
     for left, right in edits:
