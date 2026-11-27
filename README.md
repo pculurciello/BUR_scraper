@@ -580,6 +580,13 @@ python -m unittest -v test_extract_bur_part_one.py
 ```
 
 
+## Revisione dei titoli del sommario con vLLM
+
+Per rivedere i titoli di un TXT della Parte Prima, usa `review_bur_titles.py`.
+Lo script invia ogni titolo a vLLM e reinserisce la risposta nella voce.
+La [guida alla revisione dei titoli](docs/TITLE_REVIEW.md) descrive il formato
+di input e la configurazione del server.
+
 ## Cartella di input predefinita per i bandi
 
 L'estrattore dei bandi legge soltanto i TXT in `./bur_parte_prima` e nelle sue
