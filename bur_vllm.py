@@ -29,6 +29,9 @@ PROMPT = (
     "The proposed joined spelling may be a valid word with a different meaning. "
     "For example, join the split fragment in 'un laborator io qualificato' "
     "and keep both words in 'illuminazione in corso Italia'. "
+    "When in_vocabulary is false, join only if the surrounding Italian makes "
+    "the single word or name clear and the separated reading is implausible. "
+    "A rare or unknown token may be a valid word, surname, abbreviation, or place. "
     "If in doubt choose uncertain. "
     'Return only a JSON object with exactly one key "decisions", whose value maps '
     "each supplied id (as a string) to its decision."
@@ -36,25 +39,31 @@ PROMPT = (
 CHOICES = {"join", "keep", "uncertain"}
 
 
-def candidates(text, vocabulary, attested):
+def candidates(text, vocabulary, attested, recover_missing=False):
     words = iter(WORD.finditer(text))
     left = next(words, None)
     for right in words:
         gap = text[left.end():right.start()]
         first, second = left[0].casefold(), right[0].casefold()
         joined = first + second
-        if (GAP.fullmatch(gap) and joined in vocabulary
-                and (attested is None or "-" in gap or joined in attested
-                     or min(len(first), len(second)) >= 3)
+        hyphenated = "-" in gap
+        dictionary_match = joined in vocabulary and (
+            attested is None or hyphenated or joined in attested
+            or min(len(first), len(second)) >= 3
+        )
+        # A vocabulary miss can be an inflection or a name. Review these only
+        # in the opt-in pass, with the weaker evidence exposed to the model.
+        fallback = recover_missing and (hyphenated or len(joined) >= 4)
+        if (GAP.fullmatch(gap) and (dictionary_match or fallback)
                 and not (first in vocabulary and second in vocabulary)
-                and not ("-" in gap and ROMAN.fullmatch(left[0]))):
+                and not (hyphenated and ROMAN.fullmatch(left[0]))):
             yield left.start(), left.end(), right.start(), right.end()
         left = right
 
 
-def groups(text, vocabulary, attested):
+def groups(text, vocabulary, attested, recover_missing):
     # The spans are sorted. A newline inside a wrap candidate stays in its context.
-    spans = iter(candidates(text, vocabulary, attested))
+    spans = iter(candidates(text, vocabulary, attested, recover_missing))
     span = next(spans, None)
     start = 0
     batch = []
@@ -77,13 +86,14 @@ def groups(text, vocabulary, attested):
         yield start, len(text), batch
 
 
-def payload_for(text, start, stop, spans):
+def payload_for(text, start, stop, spans, vocabulary):
     passage = text[start:stop]
     return {
         "text": passage,
         "candidates": [
             {"id": str(i), "start": a - start, "end": d - start,
-             "original": text[a:d], "joined": text[a:b] + text[c:d]}
+             "original": text[a:d], "joined": text[a:b] + text[c:d],
+             "in_vocabulary": (text[a:b] + text[c:d]).casefold() in vocabulary}
             for i, (a, b, c, d) in enumerate(spans)
         ],
     }
@@ -168,8 +178,8 @@ def process(text, vocabulary, attested, args, db, pool):
     audit = []
     work = []
     checked = False
-    for start, stop, spans in groups(text, vocabulary, attested):
-        payload = payload_for(text, start, stop, spans)
+    for start, stop, spans in groups(text, vocabulary, attested, args.recover_missing):
+        payload = payload_for(text, start, stop, spans, vocabulary)
         key = hashlib.sha256(json.dumps(
             [args.url, args.model, PROMPT, payload], sort_keys=True
         ).encode()).hexdigest()
@@ -205,7 +215,8 @@ def process(text, vocabulary, attested, args, db, pool):
             if decision == "join":
                 edits.append((b, c))
             audit.append({"start": a, "end": d, "original": candidate["original"],
-                          "joined": candidate["joined"], "decision": decision})
+                          "joined": candidate["joined"], "in_vocabulary": candidate["in_vocabulary"],
+                          "decision": decision})
     pieces = []
     start = 0
     for left, right in edits:
@@ -227,6 +238,8 @@ def main():
     parser.add_argument("--timeout", type=float, default=90)
     parser.add_argument("--corpus-min", type=int, default=0,
                         help="also use alphabetic forms seen intact at least N times")
+    parser.add_argument("--recover-missing", action="store_true",
+                        help="also ask vLLM to review possible joins without dictionary or corpus support")
     args = parser.parse_args()
     try:
         args.url = completion_url(args.url)
