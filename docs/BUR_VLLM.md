@@ -77,6 +77,21 @@ esulano da questo passaggio.
 Prima di elaborare l'intero archivio, confronta alcuni TXT corretti con gli
 originali. Controlla sia le unioni errate sia le parole spezzate ancora presenti.
 
+## Come evitare unioni errate
+
+Un candidato deve avere almeno un frammento assente dal vocabolario.
+Se entrambe le forme sono presenti, lo script conserva la separazione.
+La sequenza `in corso` è protetta esplicitamente anche con vocabolari
+incompleti, per esempio in `illuminazione in corso Italia`. Il filtro
+può lasciare qualche parola spezzata quando entrambe le parti sono
+anche parole valide.
+
+Per correggere le unioni prodotte da una versione precedente, riesegui lo
+script sui TXT originali, per esempio da `bur_fvg` verso `repaired`.
+I TXT corretti e i registri vengono riscritti per i file completati.
+La versione aggiornata usa un prompt diverso, quindi le decisioni
+precedenti non vengono riutilizzate.
+
 ## HTTP 404 da vLLM
 
 Un HTTP 404 nella richiesta indica che il server ha risposto. Può mancare
