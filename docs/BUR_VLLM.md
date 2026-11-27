@@ -79,7 +79,7 @@ originali. Controlla sia le unioni errate sia le parole spezzate ancora presenti
 
 ## Come evitare unioni errate
 
-La forma ricomposta deve essere nel vocabolario, e almeno un frammento
+In modalità predefinita, la forma ricomposta deve essere nel vocabolario, e almeno un frammento
 deve esserne assente. Per un'unione con soli spazi, serve almeno una delle
 seguenti condizioni:
 
@@ -144,8 +144,13 @@ python bur_vllm.py bur_fvg/2004/BUR_legacy_510_514_ordinario.txt repaired_review
 
 Questa modalità chiede a vLLM di valutare anche le coppie con supporto
 lessicale o di corpus insufficiente, come una forma flessa assente dal
-vocabolario o un frammento di una sola lettera. Esclude ancora le coppie
-i cui due frammenti sono entrambi nel vocabolario. Il registro include
+vocabolario o un frammento di una sola lettera. Se entrambi i frammenti
+sono nel vocabolario, la coppia viene valutata quando la forma ricomposta
+è nel vocabolario o attestata dalla scansione del corpus. vLLM confronta
+la frase con e senza l'unione e risponde `join` solo quando la forma unita
+è chiaramente più probabile. Per esempio, `In tanto possiamo iniziare`
+può diventare `Intanto possiamo iniziare`, mentre `illuminazione in corso
+Italia` conserva la separazione. Il registro include
 `in_vocabulary` per indicare se la forma ricomposta è nel vocabolario
 usato dal programma. La scansione può produrre più richieste e più
 falsi positivi. Controlla i `join` del fascicolo di prova prima di
