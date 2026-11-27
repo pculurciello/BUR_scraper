@@ -27,6 +27,8 @@ PROMPT = (
     "the indicated gap restores the intended single word in context. Preserve "
     "real hyphens, separators, and valid phrases, including names and addresses. "
     "The proposed joined spelling may be a valid word with a different meaning. "
+    "For example, join the split fragment in 'un laborator io qualificato' "
+    "and keep both words in 'illuminazione in corso Italia'. "
     "If in doubt choose uncertain. "
     'Return only a JSON object with exactly one key "decisions", whose value maps '
     "each supplied id (as a string) to its decision."
@@ -42,7 +44,8 @@ def candidates(text, vocabulary, attested):
         first, second = left[0].casefold(), right[0].casefold()
         joined = first + second
         if (GAP.fullmatch(gap) and joined in vocabulary
-                and (attested is None or "-" in gap or joined in attested)
+                and (attested is None or "-" in gap or joined in attested
+                     or min(len(first), len(second)) >= 3)
                 and not (first in vocabulary and second in vocabulary)
                 and not ("-" in gap and ROMAN.fullmatch(left[0]))):
             yield left.start(), left.end(), right.start(), right.end()
